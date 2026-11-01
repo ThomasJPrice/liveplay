@@ -110,6 +110,8 @@
     "transitionModeHelp": "How newly imported tracks hand over to the next one. You can change it per track in Properties.",
     "transitionModeCrossfade": "Crossfade to next",
     "transitionModeStartNext": "Start next at marker",
+    "defaultDuckingMode": "Default Ducking Mode",
+    "defaultDuckingModeHelp": "How a newly imported track behaves toward other playing cues. You can change it per track in Properties. \"No Ducking\" lets cues overlay freely, like MultiPlay.",
     "autoCueNext": "Always set the next item as Up Next",
     "autoCueNextHelp": "Marks the next item as Up Next even when the playing item has no end behaviour, so one GO button steps through the playlist. Nothing starts on its own.",
     "useProjectDefault": "Use project default",

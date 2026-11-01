@@ -435,6 +435,11 @@ export interface ProjectSettings {
     rmsWindowMs?: number;
   };
   defaultTransitionMode?: TransitionMode;
+  // Ducking mode newly imported playlist cues default to. Absent = 'stop-all'
+  // (legacy/MultiPlay-unlike default); every cue can still be switched
+  // individually in its own Ducking tab. Cart items keep their own
+  // 'duck-others' default (DEFAULT_CART_AUDIO_ITEM) regardless of this.
+  defaultDuckingMode?: DuckingBehavior['mode'];
   autoCueNextWithoutEndBehavior?: boolean;
   stopAllFadeMs?: number;
   // Absent = true: Stop All silences the preview audition too (#60).
@@ -539,6 +544,24 @@ export function transitionDefaultsForImport(
       // ignores the marker while it is <= 0 (e.g. duration still unknown).
       startNextTime: Math.max(0, duration - 5),
       startNextFadeOut: false,
+    };
+  }
+  return {};
+}
+
+// Ducking default for a freshly imported playlist item, derived from the
+// project's `settings.defaultDuckingMode`. Spread over DEFAULT_AUDIO_ITEM
+// (after it, so this wins) when creating the item; every cue can still be
+// switched individually in its own Ducking tab.
+export function duckingDefaultsForImport(
+  mode: DuckingBehavior['mode'] | string | undefined
+): Partial<AudioItem> {
+  if (mode === 'no-ducking' || mode === 'duck-others') {
+    return {
+      duckingBehavior: {
+        ...(DEFAULT_AUDIO_ITEM.duckingBehavior as DuckingBehavior),
+        mode,
+      },
     };
   }
   return {};

@@ -21,6 +21,26 @@
       <p class="settings-help">{{ t('settings.transitionModeHelp') }}</p>
     </section>
 
+    <!-- Which ducking mode a newly imported track defaults to. Every track
+         can still be switched individually in its own Ducking tab. Cart
+         items keep their own "duck others" default regardless. -->
+    <section class="settings-field">
+      <label class="settings-label">
+        <span class="material-symbols-rounded">layers</span>
+        {{ t('settings.defaultDuckingMode') }}
+      </label>
+      <select
+        class="settings-select"
+        :value="defaultDuckingMode"
+        @change="onDefaultDuckingModeChange"
+      >
+        <option value="stop-all">{{ t('duckingBehavior.stopAll') }}</option>
+        <option value="no-ducking">{{ t('duckingBehavior.noDucking') }}</option>
+        <option value="duck-others">{{ t('duckingBehavior.duckOthers') }}</option>
+      </select>
+      <p class="settings-help">{{ t('settings.defaultDuckingModeHelp') }}</p>
+    </section>
+
     <section class="settings-field">
       <label class="settings-label settings-label--checkbox">
         <input
@@ -95,6 +115,7 @@ const { t } = useLocalization();
 const { settings, applyPatch } = useProjectSettings();
 
 const defaultTransitionMode = computed(() => settings.value.defaultTransitionMode || 'crossfade');
+const defaultDuckingMode = computed(() => settings.value.defaultDuckingMode || 'stop-all');
 const disableAutoVolumeAndTrim = computed(() => !!settings.value.disableAutoVolumeAndTrim);
 const disableSilenceWarning = computed(() => !!settings.value.disableSilenceWarning);
 // Defaults ON (undefined → true) so legacy and new projects both arm the next
@@ -111,6 +132,9 @@ const stopAllFadeSeconds = computed(() => {
 
 function onDefaultTransitionModeChange(e: Event) {
   applyPatch({ defaultTransitionMode: (e.target as HTMLSelectElement).value });
+}
+function onDefaultDuckingModeChange(e: Event) {
+  applyPatch({ defaultDuckingMode: (e.target as HTMLSelectElement).value as any });
 }
 function onAutoCueNextChange(e: Event) {
   applyPatch({ autoCueNextWithoutEndBehavior: (e.target as HTMLInputElement).checked });
