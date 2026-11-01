@@ -232,6 +232,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     recentRemove: (url) => ipcRenderer.invoke('liveplay-discovery:recent-remove', url),
   },
 
+  // Google Sheets cue-list sync (Push/Pull). The key path is this machine's
+  // credential; spreadsheetId/sheetName are the show's and travel with the
+  // project, so the renderer passes them in on every pull/push call rather
+  // than main.js holding them.
+  sheetsSync: {
+    getConfig:     ()    => ipcRenderer.invoke('sheets-sync:get-config'),
+    setConfig:     (cfg) => ipcRenderer.invoke('sheets-sync:set-config', cfg),
+    selectKeyFile: ()    => ipcRenderer.invoke('sheets-sync:select-key-file'),
+    pull: (opts) => ipcRenderer.invoke('sheets-sync:pull', opts),
+    push: (opts) => ipcRenderer.invoke('sheets-sync:push', opts),
+  },
+
   // Recent-projects history (persisted) — last 10 .liveplay files opened on
   // this client. Surfaced in the File > Open Recent menu.
   liveplayProjects: {

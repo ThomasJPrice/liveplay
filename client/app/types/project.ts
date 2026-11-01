@@ -454,6 +454,15 @@ export interface ProjectSettings {
    * paths remain zero-based for backwards compatibility.
    */
   indexDisplayStart?: number;
+
+  // Google Sheets cue-list sync (Push/Pull). Which spreadsheet and tab is a
+  // property of this show, so it travels with the project; the service
+  // account credential that authenticates to it is a machine setting (see
+  // electron/sheets-sync.js) and does NOT live here.
+  sheetsSyncSpreadsheetId?: string;
+  sheetsSyncSheetName?: string;
+  /** ISO timestamp of the last successful Push or Pull, for display only. */
+  sheetsSyncLastSync?: string;
 }
 
 

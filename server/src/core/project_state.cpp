@@ -469,6 +469,16 @@ static const std::unordered_map<std::string, SettingSpec>& settings_registry() {
         // number inside a sane column width.
         {"indexDisplayStart",             {SettingKind::Integer, 0.0, 1'000'000.0}},
 
+        // --- Google Sheets cue-list sync (Push/Pull) ----------------------
+        // Which spreadsheet/tab this show syncs to. The service-account
+        // credential that authenticates to it is a machine setting, not a
+        // show one, and is never stored in the document (see the client's
+        // electron/sheets-sync.js).
+        {"sheetsSyncSpreadsheetId",       {SettingKind::StringOrNull}},
+        {"sheetsSyncSheetName",           {SettingKind::StringOrNull}},
+        // ISO timestamp of the last successful Push or Pull. Display only.
+        {"sheetsSyncLastSync",            {SettingKind::StringOrNull}},
+
         // --- Legacy, still honoured on the way in ------------------------
         // All three migrate at load and are erased from the document there —
         // the first two onto buses, ltcDevice onto ltcOutput. They stay
