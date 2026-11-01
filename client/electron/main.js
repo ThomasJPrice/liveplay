@@ -10,6 +10,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const { promisify } = require('util');
 const https = require('https');
 const execPromise = promisify(exec);
+const sheetsSync = require('./sheets-sync');
 
 // A show machine is often offline, and a library that makes a request without
 // listening for its 'error' event turns "no network" into an uncaught
@@ -1041,6 +1042,116 @@ ipcMain.handle('liveplay-projects:recent-clear', () => {
   const list = clearRecentProjects();
   createMenu(currentLocale, isDevMode);
   return list;
+});
+
+// ===========================================================================
+// Google Sheets cue-list sync (Push/Pull) — credential half.
+// ---------------------------------------------------------------------------
+// The service-account key path is a MACHINE credential (like which server
+// this client points at), so it lives in userData alongside
+// liveplay-server.json rather than in the project — a key file on this
+// machine has no business travelling inside a .liveplay document that gets
+// emailed or copied to another PC. Which spreadsheet a given show syncs to
+// IS a show property, so that lives in the project's own settings
+// (ProjectSettings.sheetsSync*) and is read/written entirely on the renderer
+// side; main.js never sees the spreadsheet id.
+// ===========================================================================
+const SHEETS_SYNC_CONFIG_FILENAME = 'liveplay-sheets-sync.json';
+
+function sheetsSyncConfigPath() {
+  return path.join(app.getPath('userData'), SHEETS_SYNC_CONFIG_FILENAME);
+}
+
+function readSheetsSyncConfig() {
+  try {
+    const raw = fs.readFileSync(sheetsSyncConfigPath(), 'utf-8');
+    const parsed = JSON.parse(raw);
+    return { serviceAccountKeyPath: typeof parsed.serviceAccountKeyPath === 'string' ? parsed.serviceAccountKeyPath : '' };
+  } catch {
+    return { serviceAccountKeyPath: '' };
+  }
+}
+
+function writeSheetsSyncConfig(cfg) {
+  try {
+    fs.writeFileSync(sheetsSyncConfigPath(), JSON.stringify(cfg, null, 2));
+  } catch (e) {
+    console.error('[sheets-sync] could not persist config:', e);
+  }
+}
+
+// Loads and parses the configured key file fresh each call rather than
+// caching its contents — it is read rarely (once per Push/Pull) and a cache
+// would need its own invalidation the moment someone points Settings at a
+// different key, which is not worth it for a file this small.
+function loadServiceAccountKey() {
+  const cfg = readSheetsSyncConfig();
+  if (!cfg.serviceAccountKeyPath) {
+    throw new Error('No service-account key configured. Set one in Settings → Project.');
+  }
+  let raw;
+  try {
+    raw = fs.readFileSync(cfg.serviceAccountKeyPath, 'utf-8');
+  } catch (e) {
+    throw new Error(`Could not read the service-account key file: ${e.message}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('The service-account key file is not valid JSON.');
+  }
+  if (!parsed.client_email || !parsed.private_key) {
+    throw new Error('The service-account key file is missing client_email or private_key.');
+  }
+  return parsed;
+}
+
+ipcMain.handle('sheets-sync:get-config', () => {
+  const cfg = readSheetsSyncConfig();
+  // The renderer gets *whether* a key is configured and its filename for
+  // display, never the key's contents.
+  return {
+    serviceAccountKeyPath: cfg.serviceAccountKeyPath,
+    serviceAccountEmail: (() => {
+      try { return loadServiceAccountKey().client_email; } catch { return null; }
+    })(),
+  };
+});
+
+ipcMain.handle('sheets-sync:set-config', (_e, incoming) => {
+  const next = { serviceAccountKeyPath: typeof incoming?.serviceAccountKeyPath === 'string' ? incoming.serviceAccountKeyPath : '' };
+  writeSheetsSyncConfig(next);
+  return next;
+});
+
+ipcMain.handle('sheets-sync:select-key-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Google Service Account Key',
+    properties: ['openFile'],
+    filters: [{ name: 'Service Account Key', extensions: ['json'] }],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+// Pull: read every row of `sheetName` and hand them straight back — the
+// renderer owns the schema (header → field mapping) and the diff/merge logic
+// against the live project, since that needs the full item tree this process
+// never holds a copy of.
+ipcMain.handle('sheets-sync:pull', async (_e, { spreadsheetId, sheetName }) => {
+  const serviceAccount = loadServiceAccountKey();
+  if (!spreadsheetId) throw new Error('No spreadsheet is configured for this show.');
+  return sheetsSync.readSheet({ serviceAccount, spreadsheetId, sheetName: sheetName || 'Cues' });
+});
+
+// Push: the renderer flattens the current project to rows and hands them
+// over whole; this just authenticates and overwrites the sheet.
+ipcMain.handle('sheets-sync:push', async (_e, { spreadsheetId, sheetName, header, rows }) => {
+  const serviceAccount = loadServiceAccountKey();
+  if (!spreadsheetId) throw new Error('No spreadsheet is configured for this show.');
+  await sheetsSync.writeSheet({ serviceAccount, spreadsheetId, sheetName: sheetName || 'Cues', header, rows });
+  return { ok: true };
 });
 
 // Setup bundled ffmpeg - always use the bundled version to avoid
