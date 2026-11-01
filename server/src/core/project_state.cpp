@@ -451,6 +451,10 @@ static const std::unordered_map<std::string, SettingSpec>& settings_registry() {
         // --- Playback ----------------------------------------------------
         {"defaultTransitionMode",         {SettingKind::Enum, 0, 0,
                                            {"crossfade", "start-next"}}},
+        // Ducking mode newly imported playlist cues default to; every cue can
+        // still be switched individually. Absent = "stop-all" (legacy).
+        {"defaultDuckingMode",            {SettingKind::Enum, 0, 0,
+                                           {"stop-all", "no-ducking", "duck-others"}}},
         {"autoCueNextWithoutEndBehavior", {SettingKind::Bool}},
         // 60 s is well past any musical fade and still finite, so a typo'd
         // value cannot wedge Stop-All into an unstoppable ramp.

@@ -55,7 +55,7 @@ import Btn from './Btn.vue';
 import PaneControls from './PaneControls.vue';
 import { triggerRef } from 'vue';
 import type { AudioItem, GroupItem } from '~/types/project';
-import { DEFAULT_AUDIO_ITEM, DEFAULT_GROUP_ITEM, transitionDefaultsForImport, anchorStartNextMarker } from '~/types/project';
+import { DEFAULT_AUDIO_ITEM, DEFAULT_GROUP_ITEM, transitionDefaultsForImport, duckingDefaultsForImport, anchorStartNextMarker } from '~/types/project';
 import { applyAutoProcessing, buildWaveformFromChannels, parseWaveformFileData } from '~/utils/audio';
 import { useOutputTarget } from '~/composables/useOutputTarget';
 
@@ -340,6 +340,7 @@ const importFromServerPath = async (serverPath: string) => {
     const audioItem: AudioItem = {
       ...DEFAULT_AUDIO_ITEM,
       ...transitionDefaultsForImport((currentProject.value as any)?.settings?.defaultTransitionMode, duration),
+      ...duckingDefaultsForImport((currentProject.value as any)?.settings?.defaultDuckingMode),
       uuid,
       index: [currentProject.value.items.length],
       displayName: fileName.replace(/\.[^/.]+$/, ''),
@@ -394,6 +395,7 @@ const importAudioFile = async (sourcePath: string) => {
     const audioItem: AudioItem = {
       ...DEFAULT_AUDIO_ITEM,
       ...transitionDefaultsForImport((currentProject.value as any)?.settings?.defaultTransitionMode, duration),
+      ...duckingDefaultsForImport((currentProject.value as any)?.settings?.defaultDuckingMode),
       uuid,
       index: [currentProject.value.items.length],
       displayName: fileName.replace(/\.[^/.]+$/, ''), // Remove extension
