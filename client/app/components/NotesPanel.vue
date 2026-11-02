@@ -51,7 +51,10 @@
 import PaneControls from './PaneControls.vue';
 
 const { t } = useLocalization();
-const { activeCues, nextItemOverrideUuid, autoNextItemUuid } = useAudioEngine();
+const { activeCues } = useAudioEngine();
+// The head — see the Head pointer + Cue Advance plan. Up Next is just
+// whatever's currently selected now that selection IS the head.
+const { selectedItemUuid } = useShowControl();
 const { findItemByUuid } = useProject();
 
 interface NoteEntry { uuid: string; name: string; notes: string }
@@ -65,11 +68,8 @@ const nowPlayingEntries = computed<NoteEntry[]>(() => {
   return out;
 });
 
-// Same precedence as the playlist's "Up Next" badge (PlaylistItem.vue):
-// a manual override wins, otherwise fall back to the end-behaviour-derived
-// auto next item.
 const upNextEntry = computed<NoteEntry | null>(() => {
-  const uuid = nextItemOverrideUuid.value || autoNextItemUuid.value;
+  const uuid = selectedItemUuid.value;
   if (!uuid) return null;
   const item = findItemByUuid(uuid);
   if (!item) return null;

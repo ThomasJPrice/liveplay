@@ -233,7 +233,10 @@
     "endGotoItem": "End: Go To Item",
     "endGotoIndex": "End: Go To Index",
     "endLoop": "End: Loop",
-    "startNextMarker": "Starts next track at {time}"
+    "startNextMarker": "Starts next track at {time}",
+    "startPlay": "Cue Advance: Start Play",
+    "endAdvance": "Cue Advance: End Advance",
+    "endPlay": "Cue Advance: End Play"
   },
   "waveform": {
     "decreaseBy": "Decrease by {seconds}s",
@@ -258,6 +261,10 @@
     "volume": "Volume",
     "endBehavior": "End Behaviour",
     "startBehavior": "Start Behaviour",
+    "cueAdvance": "Cue Advance",
+    "cueAdvanceHelp": "Moves the head (what GO plays) when this cue starts or ends, and for the “Play” variants plays the target too. Target defaults to the next cue in the list.",
+    "cueAdvanceTargetPlaceholder": "Next cue (leave blank)",
+    "cueAdvanceTargetHelp": "A specific cue's UUID, or leave blank to use the next cue in the list. Target Index below is an alternative way to name a target by its position.",
     "duckingBehavior": "Ducking Behaviour",
     "fadeOutDuration": "Fade Out Duration",
     "duckFadeIn": "Duck Fade In",
@@ -339,6 +346,13 @@
     "gotoItem": "Go to Item",
     "gotoIndex": "Go to Index",
     "loop": "Loop"
+  },
+  "cueAdvance": {
+    "noAction": "No Action",
+    "startAdvance": "Start Advance",
+    "startPlay": "Start Play",
+    "endAdvance": "End Advance",
+    "endPlay": "End Play"
   },
   "startBehavior": {
     "nothing": "Nothing",
@@ -473,6 +487,7 @@
     "fieldColour": "Colour",
     "fieldStartBehaviour": "Start Behaviour",
     "fieldEndBehaviour": "End Behaviour",
+    "fieldCueAdvance": "Cue Advance",
     "fieldBus": "Bus",
     "fieldVolume": "Volume",
     "fieldNotes": "Notes",
@@ -487,6 +502,7 @@
     "errorBadStartAction": "\"{value}\" isn't a valid Start Behaviour.",
     "errorBadEndAction": "\"{value}\" isn't a valid End Behaviour.",
     "errorBadEndActionGroup": "\"{value}\" isn't a valid End Behaviour for a Scene/Block (use nothing or loop).",
+    "errorBadCueAdvance": "\"{value}\" isn't a valid Cue Advance (use no-action, start-advance, start-play, end-advance or end-play).",
     "errorUnknownBus": "No bus named \"{name}\" was found.",
     "errorBadVolume": "\"{value}\" isn't a valid Volume (must be 0–2)."
   },
@@ -780,6 +796,7 @@
     "reassign": "Reassign",
     "conflictMessage": "This MIDI control is already assigned to \"{action}\". Reassign it?",
     "playNext": "Play Next",
+    "go": "Go",
     "volumeMultiplier": "Volume Multiplier",
     "volumeMultiplierHint": "dB per MIDI step. Raise it for encoders or wheels that move in small steps.",
     "nextIn": "Next in {seconds}s"

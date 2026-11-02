@@ -7,22 +7,26 @@
 // AudioEngine + sequencer. The composable's only job is:
 //
 //   1. Translate component-level intents (playCue / stopCue / seekCue /
-//      pauseCue / setMasterGain / setNextItem / ...) into WS or REST
-//      calls.
+//      pauseCue / setMasterGain / ...) into WS or REST calls.
 //   2. Maintain a *reactive view* of what the server is doing:
 //        - `activeCues`    : Map<itemUuid, ActiveCueView>
 //        - `activeGroups`  : Map<groupUuid, ActiveGroupView>     (derived)
 //        - `masterOutputLevel`, `masterPeakLevel`  (read from server meters)
 //        - `masterGainDb`              (server-authoritative)
-//        - `nextItemOverrideUuid`      (server-authoritative)
-//        - `autoNextItemUuid`          (derived from project doc)
+//
+// The persistent "head" (what GO plays, what PREV/NEXT step) is
+// useShowControl's selectedItemUuid / selectStep, NOT this composable —
+// see the Head pointer + Cue Advance plan. This file used to also carry a
+// `nextItemOverrideUuid`/`autoNextItemUuid` pair deriving an "Up Next" from
+// whichever cue happened to be active; that broke the moment two cues
+// overlapped (it could only ever reflect one), and is fully superseded.
 //
 // Every field is updated from one of:
 //   * `cue_state` WS edges (Stopped/Playing/FadingIn/FadingOut/Paused)
 //   * `playback_snapshot` WS message on (re)connect
 //   * `meters` WS broadcast (playhead per active cue, master levels)
-//   * `doc_patch` ops broadcast from REST mutators (next_item_set,
-//     master_gain_changed, preview_started/stopped)
+//   * `doc_patch` ops broadcast from REST mutators (master_gain_changed,
+//     preview_started/stopped)
 //
 // Component compatibility: the public surface (function names + the
 // shape of activeCues / activeGroups entries) matches the legacy
@@ -119,14 +123,6 @@ export const useAudioEngine = () => {
   // Server-authoritative master gain. setMasterGain pushes via REST;
   // the master_gain_changed doc_patch reflects it back to every client.
   const masterGainDb = useState<number>('masterGainDb', () => 0);
-
-  // Server-authoritative "Up Next" override. setNextItem writes via WS,
-  // server fans out as next_item_set doc_patch. All auto-cue arming decisions
-  // (#28: advance-on-stop, first-item-on-open, end-of-list wrap) now live on
-  // the authoritative server (ProjectState::arm_next_after_stop /
-  // arm_first_item_on_open) so every connected client mirrors one decision
-  // instead of each computing its own. The client only reflects this value.
-  const nextItemOverrideUuid = useState<string | null>('nextItemOverrideUuid', () => null);
 
   // ---- Helpers -------------------------------------------------------
   const findItemByServerCueId = (cueId: string): AudioItem | null => {
@@ -352,12 +348,6 @@ export const useAudioEngine = () => {
     }
   };
 
-  // Note: the auto-cue "Up Next" arming that used to live here (advance on
-  // stop, first-item on open, end-of-list wrap) is now owned entirely by the
-  // server so multiple clients share one authoritative decision. The client
-  // only reflects `nextItemOverrideUuid` (pushed via next_item_set / snapshot)
-  // and the deterministic `autoNextItemUuid` display below.
-
   // ---- activeGroups projection --------------------------------------
   // A group is "playing" if any of its descendant audio items is in
   // activeCues. totalDuration / currentTime are computed from the
@@ -393,61 +383,6 @@ export const useAudioEngine = () => {
     }
     activeGroups.value = next;
   };
-
-  // ---- autoNextItemUuid (derived) -----------------------------------
-  const autoNextItemUuid = computed((): string | null => {
-    if (!currentProject.value) return null;
-    for (const [uuid] of activeCues.value.entries()) {
-      const item = findItemByUuid(uuid);
-      if (!item || item.type !== 'audio') continue;
-      const audioItem = item as AudioItem;
-      // Only a cue that is really in the playlist has a "next" in the running
-      // order. findItemByUuid also returns cart-only sounds, whose index is
-      // [-1, slot] and names no playlist position, and a stale index would be
-      // just as wrong — so the item must actually sit where its index says.
-      if (!Array.isArray(audioItem.index) || findItemByIndex(audioItem.index)?.uuid !== uuid) continue;
-      switch (audioItem.endBehavior.action) {
-        case 'next': {
-          const nextIndex = [...audioItem.index];
-          nextIndex[nextIndex.length - 1]++;
-          const nextItem = resolvePastEmptyCues(findItemByIndex(nextIndex));
-          if (nextItem) return nextItem.uuid;
-          break;
-        }
-        case 'loop':
-          // A looping cue replays itself — surface it as its own "up next"
-          // so the UI reflects the end behaviour instead of showing nothing.
-          return audioItem.uuid;
-        case 'goto-item':
-          if (audioItem.endBehavior.targetUuid) {
-            const target = resolvePastEmptyCues(findItemByUuid(audioItem.endBehavior.targetUuid));
-            if (target) return target.uuid;
-          }
-          break;
-        case 'goto-index':
-          if (audioItem.endBehavior.targetIndex) {
-            const target = resolvePastEmptyCues(findItemByIndex(audioItem.endBehavior.targetIndex));
-            if (target) return target.uuid;
-          }
-          break;
-      }
-
-      // Issue #28: an item WITHOUT an end behaviour still arms the next
-      // playlist item as "Up Next" when the project setting is enabled
-      // (default on, incl. legacy projects). This only arms the manual GO
-      // target — the server never auto-advances a 'nothing' cue, so playback
-      // still waits for the operator to press GO / spacebar. Lets an operator
-      // step through a pre-ordered playlist with a single button.
-      if (audioItem.endBehavior.action === 'nothing' &&
-          (currentProject.value as any)?.settings?.autoCueNextWithoutEndBehavior !== false) {
-        const nextIndex = [...audioItem.index];
-        nextIndex[nextIndex.length - 1]++;
-        const nextItem = resolvePastEmptyCues(findItemByIndex(nextIndex));
-        if (nextItem) return nextItem.uuid;
-      }
-    }
-    return null;
-  });
 
   // ---- WS / REST plumbing -------------------------------------------
   // Installed exactly once per renderer. Everything below writes only to
@@ -507,36 +442,21 @@ export const useAudioEngine = () => {
     upsertActiveCue(item as AudioItem, transport, playhead_seconds, cue_id);
     recomputeActiveGroups();
     // Consume the "Up Next" arming the moment the armed item actually starts —
-    // via ANY path (GO button, the item's own play button, MIDI, cart, or the
-    // server's own auto-advance), not only the GO button. Otherwise a manual
-    // override still pointing at the now-playing item shadows the derived
-    // autoNextItemUuid, and "Up Next" sticks on the item that's already
-    // playing instead of advancing (the #28 open-a-project regression). Also
-    // pushes the clear to the server so a later reconnect snapshot can't
-    // restore the stale arming.
-    if ((transport === TRANSPORT_PLAYING || transport === TRANSPORT_FADING_IN) &&
-        nextItemOverrideUuid.value && nextItemOverrideUuid.value === item.uuid) {
-      setNextItem(null);
-    }
   });
 
   // On (re)connect the server pushes a snapshot of what's already
   // playing. useLiveplayServer fires this BEFORE synthesising per-cue
-  // events; we use it to refresh master gain + next-item state too.
+  // events; we use it to refresh master gain.
   server.onPlaybackSnapshot((snap: any) => {
     if (snap && typeof snap.master_gain_db === 'number') {
       masterGainDb.value = snap.master_gain_db;
     }
-    nextItemOverrideUuid.value = snap?.next_item_uuid || null;
   });
 
   // Doc_patch: server-driven state changes other clients might trigger.
   server.onDocPatch((patch: any) => {
     if (!patch || typeof patch !== 'object') return;
     switch (patch.op) {
-      case 'next_item_set':
-        nextItemOverrideUuid.value = patch.itemUuid || null;
-        break;
       case 'master_gain_changed':
         if (typeof patch.db === 'number') masterGainDb.value = patch.db;
         break;
@@ -707,11 +627,6 @@ export const useAudioEngine = () => {
     void server.setMasterGainDb(clamped);
   };
 
-  const setNextItem = (uuid: string | null) => {
-    nextItemOverrideUuid.value = uuid;
-    server.setNextItem(uuid);
-  };
-
   // ---- Custom action: http-request (client-side handler) ------------
   // The server's sequencer schedules custom actions and executes the
   // server-side ones directly (play-item / play-index / stop-all).
@@ -745,10 +660,7 @@ export const useAudioEngine = () => {
     masterOutputLevel,
     masterPeakLevel,
     masterGainDb,
-    nextItemOverrideUuid,
-    autoNextItemUuid,
     setMasterGain,
-    setNextItem,
     playCue,
     stopCue,
     stopAllCues,

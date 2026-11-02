@@ -1604,9 +1604,44 @@ private:
     std::string first_playable_item_uuid_locked() const;
 
     // Every playlist item uuid in the client's flat selection order: each node
-    // followed by its children, depth-first. Groups are included (they are
-    // selectable and triggerable). Caller must hold mutex_.
+    // followed by its children, depth-first. A play-all group is included
+    // (triggering it is a distinct target, plays every child); a play-first
+    // group is NOT — its own uuid already aliases its first child via
+    // resolve_selection_target_locked, so giving it a separate stop here
+    // would make PREV/NEXT land on a position that immediately resolves back
+    // to where they started. Caller must hold mutex_.
     std::vector<std::string> flat_item_uuids_locked() const;
+
+    // Uuid of whatever comes immediately after `uuid` in flat_item_uuids_locked
+    // order (depth-first document order — descends into a group then moves to
+    // its next sibling), or empty if `uuid` is unknown or last. The one
+    // "structural next" used by Cue Advance's default target (no explicit
+    // targetUuid/targetIndex) and by resolve_selection_target_locked's
+    // empty-cue skip. Caller must hold mutex_.
+    std::string structural_next_locked(const std::string& uuid) const;
+
+    // Find an item's json by uuid, searching document_["items"] and
+    // cartOnlyItems (same two trees every ad-hoc walk in this file already
+    // searches). Null if not found. Caller must hold mutex_.
+    json* find_item_json_locked(const std::string& uuid);
+
+    // One-time-per-item migration: backs a `cueAdvance` into every audio item
+    // (playlist and cart) that doesn't already have one, derived from its old
+    // endBehavior — see the comment at the implementation for the mapping.
+    // Idempotent (skips any item that already carries cueAdvance), so it's
+    // safe to call on every document load/replace, not just a first-ever
+    // open. Caller must hold mutex_.
+    void migrate_cue_advance_locked();
+
+    // Resolve a uuid into what it should actually MEAN as a selection/head
+    // target: a play-first group redirects to its first child (recursively —
+    // "that's what's actually going to play", not the group heading), and an
+    // audio item with no resolvable media (an "Add Empty Audio" placeholder)
+    // skips to whatever's next in flat_item_uuids_locked order. Hop-capped
+    // against a misconfigured chain. Used by set_selected_item/step_selection
+    // so the stored selection is always already a real, playable target.
+    // Caller must hold mutex_.
+    std::string resolve_selection_target_locked(const std::string& uuid);
 
     // Re-apply the in-memory state to the AudioEngine (post-load or reset).
     void apply_to_engine_locked();
