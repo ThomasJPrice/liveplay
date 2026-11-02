@@ -94,7 +94,6 @@
         >bomb</span>
 
         <span v-if="isPlaying" class="status-pill playing">{{ t('status.playing') }}</span>
-        <span v-else-if="isQueuedNext" class="status-pill up-next">{{ t('status.upNext') }}</span>
         <span v-if="isPreviewing" class="status-pill preview">{{ t('status.previewing') }}</span>
 
         <!-- Behavior indicators (for audio items) -->
@@ -130,27 +129,32 @@
             :title="t('behaviors.startNextMarker', { time: formatMarkerTime(item.startNextTime ?? 0) })"
           >flag</span>
 
-          <!-- End behavior -->
+          <!-- End behavior — only 'loop' still lives here; 'next'/'goto-item'/
+               'goto-index' moved to cueAdvance (below). -->
           <span
-            v-if="item.endBehavior?.action === 'next'"
-            class="material-symbols-rounded behavior-icon"
-            :title="t('behaviors.endPlayNext')"
-          >skip_next</span>
-          <span
-            v-else-if="item.endBehavior?.action === 'goto-item'"
-            class="material-symbols-rounded behavior-icon"
-            :title="t('behaviors.endGotoItem')"
-          >arrow_forward</span>
-          <span
-            v-else-if="item.endBehavior?.action === 'goto-index'"
-            class="material-symbols-rounded behavior-icon"
-            :title="t('behaviors.endGotoIndex')"
-          >arrow_forward</span>
-          <span
-            v-else-if="item.endBehavior?.action === 'loop'"
+            v-if="item.endBehavior?.action === 'loop'"
             class="material-symbols-rounded behavior-icon"
             :title="t('behaviors.endLoop')"
           >replay</span>
+
+          <!-- Cue Advance — only the non-default actions get an icon; the
+               default 'start-advance' (and explicit 'no-action') stay quiet,
+               same as 'nothing' always did. -->
+          <span
+            v-if="item.cueAdvance?.action === 'start-play'"
+            class="material-symbols-rounded behavior-icon"
+            :title="t('behaviors.startPlay')"
+          >flash_on</span>
+          <span
+            v-else-if="item.cueAdvance?.action === 'end-advance'"
+            class="material-symbols-rounded behavior-icon"
+            :title="t('behaviors.endAdvance')"
+          >arrow_forward</span>
+          <span
+            v-else-if="item.cueAdvance?.action === 'end-play'"
+            class="material-symbols-rounded behavior-icon"
+            :title="t('behaviors.endPlay')"
+          >skip_next</span>
         </div>
         
         <span v-if="item.type === 'audio'" class="item-duration">{{ durationDisplay }}</span>
@@ -177,37 +181,11 @@
           >{{ groupNowPlaying.position }}/{{ groupNowPlaying.total }}</span>
         </span>
 
-        <!-- In Show Mode the live-playback actions (play/stop, set-as-next)
-             and preview remain — preview is useful pre-show too; edit and
-             delete are edit affordances and stay hidden so the row is a big,
-             safe touch target. -->
+        <!-- Preview and per-row play/stop are gone — GO (plus click-to-select)
+             is the calling mechanism now, matching the head-pointer model.
+             Settings/delete stay edit-only and hidden in Show Mode so the
+             row is a big, safe touch target with nothing destructive on it. -->
         <div class="item-actions">
-          <ActionButton
-            v-if="item.type === 'audio'"
-            :icon="'headphones'"
-            :highlight-color="isPreviewing ? 'var(--color-accent)' : 'var(--color-success)'"
-            :is-active="isPreviewing"
-            :class="{ 'no-device': !previewReady }"
-            context="Playlist"
-            @click.stop="isPreviewing ? handleStopPreview() : handleStartPreview()"
-            :title="isPreviewing ? t('actions.stopPreview') : (previewReady ? t('actions.preview') : t('actions.previewNoBus'))"
-          />
-          <ActionButton
-            :icon="isPlaying ? 'stop' : 'play_arrow'"
-            :highlight-color="isPlaying ? 'var(--color-danger)' : 'var(--color-success)'"
-            context="Playlist"
-            @click.stop="isPlaying ? handleStop() : handlePlay()"
-            :title="isPlaying ? t('actions.stop') : t('actions.play')"
-          />
-          <ActionButton
-            icon="fast_forward"
-            highlight-color="var(--color-warning)"
-            active-text-color="black"
-            :is-active="isManuallyQueued"
-            context="Playlist"
-            @click.stop="handleSetAsNext"
-            :title="t('actions.setAsNext')"
-          />
           <ActionButton
             v-if="!showMode"
             icon="settings"
@@ -276,7 +254,7 @@ const formatMarkerTime = (seconds: number): string => {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 const { levels: outputTargetLevels } = useOutputTarget();
-const { playCue, stopCue, activeCues, activeGroups, triggerGroup, nextItemOverrideUuid, autoNextItemUuid, setNextItem } = useAudioEngine();
+const { activeCues, activeGroups } = useAudioEngine();
 const { t } = useLocalization();
 const { uiMode } = useUiMode();
 
@@ -319,13 +297,6 @@ const dragPosition = ref<'top' | 'bottom' | 'group' | null>(null);
 
 const isSelected = computed(() => selectedItems.value.has(props.item.uuid));
 const isPlaying = computed(() => activeCues.value.has(props.item.uuid));
-// Manual override — drives the button highlight and toggle behaviour
-const isManuallyQueued = computed(() => nextItemOverrideUuid.value === props.item.uuid);
-// Effective "up next" — manual override wins; falls back to auto-derived from end behavior
-const isQueuedNext = computed(() => {
-  if (nextItemOverrideUuid.value) return nextItemOverrideUuid.value === props.item.uuid;
-  return autoNextItemUuid.value === props.item.uuid;
-});
 const isGroupPlaying = computed(() => props.item.type === 'group' && activeGroups.value.has(props.item.uuid));
 
 const indexDisplay = computed(() => {
@@ -613,18 +584,6 @@ const handleSelect = (event: MouseEvent) => {
   toggleItemSelection(props.item.uuid, event.ctrlKey || event.metaKey, event.shiftKey);
 };
 
-const handlePlay = () => {
-  if (props.item.type === 'audio') {
-    playCue(props.item as AudioItem);
-  } else if (props.item.type === 'group') {
-    triggerGroup(props.item);
-  }
-};
-
-const handleStop = () => {
-  stopCue(props.item.uuid);
-};
-
 const handleEdit = () => {
   openItemProperties(props.item.uuid);
 };
@@ -634,37 +593,13 @@ const handleEdit = () => {
 // headphones) without disturbing main project playback. The previewing
 // state is owned by the server (only one preview at a time); the client
 // reads it from useProject().previewItemUuid.
-const { previewItemUuid, startPreview, stopPreview } = useProject();
+// isPreviewing still reflects server-owned preview state (e.g. triggered
+// from the waveform trimmer in Properties) even though this row no longer
+// has its own preview button.
+const { previewItemUuid } = useProject();
 const isPreviewing = computed(() =>
   previewItemUuid.value === props.item.uuid,
 );
-// Pre-listen lands on the preview-role bus (D24), so the button is live only
-// when that bus reaches hardware. Before the first /api/buses fetch the list
-// is empty, which reads as "not ready" — the composable fetches on connect.
-// When there is nowhere to listen, the button opens the mixer so the fix is
-// one click away (D30); the class name `no-device` is kept for the CSS hook.
-const previewBusStore = useLiveplayServer();
-const previewReady = computed(() => !!previewBusStore.buses.find(b => b.preview)?.bound);
-const { showPane } = useWorkspaceLayout();
-const handleStartPreview = () => {
-  if (props.item.type !== 'audio') return;
-  if (!previewReady.value) {
-    showPane('mixer');
-    return;
-  }
-  startPreview(props.item.uuid);
-};
-const handleStopPreview = () => {
-  stopPreview();
-};
-
-const handleSetAsNext = () => {
-  if (isManuallyQueued.value) {
-    setNextItem(null);
-  } else {
-    setNextItem(props.item.uuid);
-  }
-};
 
 const handleDelete = () => {
   // When this item is part of a multi-selection, defer to the confirm dialog
@@ -995,8 +930,8 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--spacing-sm) var(--spacing-md);
-  min-height: 44px;
+  padding: 2px var(--spacing-xs);
+  min-height: 25px;
   position: relative;
   z-index: 5;
   cursor: pointer;
@@ -1005,7 +940,7 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
 .item-left {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-xs);
   flex: 1;
   z-index: 5;
   min-width: 0;
@@ -1026,7 +961,7 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
 }
 .item-namecol .item-name { flex: 0 0 auto; }
 .item-nowplaying {
-  font-size: 1em;
+  font-size: 0.95em;
   font-weight: 500;
   color: var(--color-text-secondary);
   overflow: hidden;
@@ -1044,19 +979,19 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
 /* tabular-nums so the counter does not jitter sideways as it counts up, the
    same reason the duration beside it is a fixed-width column. */
 .item-counter {
-  font-size: 1em;
+  font-size: 0.95em;
   color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .expand-btn {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-text-secondary);
   
   &:hover {
@@ -1065,10 +1000,9 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
 }
 
 .item-index {
-  font-size: 12px;
-  font-size: 1.5em;
+  font-size: 0.95em;
   color: var(--color-text-secondary);
-  min-width: 40px;
+  min-width: 29px;
 }
 
 .item-icon {
@@ -1076,15 +1010,15 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
   align-items: center;
   justify-content: center;
   color: var(--color-text-secondary);
-  
+
   .material-symbols-rounded {
-    font-size: 20px;
+    font-size: 18px;
   }
 }
 
 .item-name {
   font-weight: 700;
-  font-size: 1.5em;
+  font-size: 0.95em;
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -1116,9 +1050,9 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
 }
 
 .item-duration {
-  font-size: 1.5em;
+  font-size: 0.95em;
   color: var(--color-text-secondary);
-  margin: 0 var(--spacing-sm);
+  margin: 0 var(--spacing-xs);
   white-space: nowrap;
   /* Fixed-width, right-aligned column so the leading "-" shown during the
      playing countdown widens the text without shoving the flags around, and
@@ -1135,7 +1069,7 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
   flex-shrink: 0;
 
   .behavior-icon {
-    font-size: 14px;
+    font-size: 13px;
     color: var(--color-text-secondary);
     opacity: 0.7;
   }
@@ -1149,13 +1083,13 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
 .status-pill {
   display: inline-flex;
   align-items: center;
-  padding: 2px 8px;
+  padding: 1px 6px;
   border-radius: 2px;
-  font-size: 14px;
+  font-size: 10.5px;
   font-weight: 600;
   white-space: nowrap;
   flex-shrink: 0;
-  height: 30px;
+  height: 17px;
 
   &.playing {
     background-color: var(--color-danger);
@@ -1221,10 +1155,12 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
     font-size: 20px !important;
   }
 
-  /* Enlarge the remaining action buttons (preview, play/stop, set-next) for
-     touch — double width vs. height so they're easier to hit without
-     misjudging horizontal position. :deep() reaches into the ActionButton
-     child component's root. */
+  /* Settings/delete are edit-only (hidden via v-if in Show Mode), so this
+     currently has nothing to apply to — preview/play were removed from the
+     row entirely (GO + click-to-select handle calling now). Left in place
+     rather than deleted in case a touch-friendly Show Mode action returns
+     here later. :deep() reaches into the ActionButton child component's
+     root. */
   :deep(.action-btn--playlist) {
     width: 112px;
     height: 56px;

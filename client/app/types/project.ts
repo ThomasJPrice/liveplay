@@ -36,6 +36,9 @@ export interface AudioItem extends BaseItem {
   volume: number; // 0-2 (1 is normal, >1 is louder, <1 is quieter)
   endBehavior: EndBehavior;
   startBehavior: StartBehavior;
+  // Absent on cues saved before this feature — server-side migration backs
+  // it in from endBehavior on load, so a loaded project always has one.
+  cueAdvance?: CueAdvance;
   customActions: CustomAction[];
   duckingBehavior: DuckingBehavior;
   duration: number; // total duration in seconds
@@ -108,6 +111,20 @@ export interface StartBehavior {
 // Group start behavior
 export interface GroupStartBehavior {
   action: 'play-first' | 'play-all';
+}
+
+// Cue Advance — replaces EndBehavior's 'next'/'goto-item'/'goto-index' as the
+// mechanism that moves the persistent "head" (server-authoritative
+// selected_item_uuid, see useShowControl.ts) and optionally plays the
+// target. Modelled on MultiPlay's combined Start/End Advance/Play action,
+// scoped to Start/End only for v1 (no Fade In/Fade Out variants yet — LP has
+// no fade-complete event to hook). EndBehavior keeps 'loop' and 'nothing'
+// (not head concepts); StartBehavior's play/stop side-trigger is unrelated
+// and untouched.
+export interface CueAdvance {
+  action: 'no-action' | 'start-advance' | 'start-play' | 'end-advance' | 'end-play';
+  targetUuid?: string;   // explicit target; absent = structural "next" (MP's "Next Cue")
+  targetIndex?: number[];
 }
 
 // Custom action at specific time
@@ -621,8 +638,12 @@ export const DEFAULT_AUDIO_ITEM: Partial<AudioItem> = {
   color: PRESET_COLORS[0],
   inPoint: 0,
   volume: 1.0,
-  endBehavior: { action: 'next' }, // Default: play next item
+  // 'next'/'goto-item'/'goto-index' retired from EndBehavior — cueAdvance
+  // below is now what moves the head. 'loop'/'nothing' are all EndBehavior
+  // still does.
+  endBehavior: { action: 'nothing' },
   startBehavior: { action: 'nothing' },
+  cueAdvance: { action: 'start-advance' }, // MultiPlay's own default
   customActions: [],
   duckingBehavior: {
     mode: 'stop-all', // Default for playlist items: stop all other cues
@@ -649,6 +670,7 @@ export const DEFAULT_CART_AUDIO_ITEM: Partial<AudioItem> = {
   volume: 1.0,
   endBehavior: { action: 'nothing' },
   startBehavior: { action: 'nothing' },
+  cueAdvance: { action: 'no-action' }, // Cart items aren't part of the playlist head sequence
   customActions: [],
   duckingBehavior: {
     mode: 'duck-others', // Default for cart items: duck to -20dB

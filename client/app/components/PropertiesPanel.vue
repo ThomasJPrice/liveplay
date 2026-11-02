@@ -238,6 +238,9 @@
 
       <!-- End Behavior Tab -->
       <div v-if="activeTab === 'endBehavior'" class="tab-panel">
+        <!-- 'next'/'goto-item'/'goto-index' moved to the Cue Advance tab
+             (End Advance / End Play) — this is only 'nothing' and, for a
+             cue, 'loop' now. -->
         <div class="property-field">
           <label>{{ t('properties.action') }}</label>
           <select
@@ -246,49 +249,50 @@
           >
             <option v-if="mixed('endBehavior.action')" :value="MIXED" disabled>{{ t('properties.multipleValues') }}</option>
             <option value="nothing">{{ t('endBehavior.nothing') }}</option>
-            <option value="next">{{ t('endBehavior.next') }}</option>
-            <option value="goto-item">{{ t('endBehavior.gotoItem') }}</option>
-            <option value="goto-index">{{ t('endBehavior.gotoIndex') }}</option>
             <option v-if="selectedItem.type === 'audio'" value="loop">{{ t('endBehavior.loop') }}</option>
           </select>
         </div>
+      </div>
 
-        <div class="property-field" v-if="endBehaviorAction === 'goto-item'">
+      <!-- Cue Advance Tab — moves the persistent "head" (what GO plays) on
+           this cue's own start or end, and optionally plays the target too.
+           Replaces endBehavior's old 'next'/'goto-item'/'goto-index'. -->
+      <div v-if="activeTab === 'cueAdvance'" class="tab-panel">
+        <div class="property-field">
+          <label>{{ t('properties.action') }}</label>
+          <select
+            :value="mixed('cueAdvance.action') ? MIXED : cueAdvanceAction"
+            @change="commitField('cueAdvance.action', ($event.target as HTMLSelectElement).value)"
+          >
+            <option v-if="mixed('cueAdvance.action')" :value="MIXED" disabled>{{ t('properties.multipleValues') }}</option>
+            <option value="no-action">{{ t('cueAdvance.noAction') }}</option>
+            <option value="start-advance">{{ t('cueAdvance.startAdvance') }}</option>
+            <option value="start-play">{{ t('cueAdvance.startPlay') }}</option>
+            <option value="end-advance">{{ t('cueAdvance.endAdvance') }}</option>
+            <option value="end-play">{{ t('cueAdvance.endPlay') }}</option>
+          </select>
+          <p class="field-hint">{{ t('properties.cueAdvanceHelp') }}</p>
+        </div>
+
+        <div class="property-field" v-if="cueAdvanceAction !== 'no-action'">
           <label>{{ t('properties.targetUuid') }}</label>
           <input
-            :value="shown('endBehavior.targetUuid', endBehaviorTargetUuid)"
-            :placeholder="mixed('endBehavior.targetUuid') ? t('properties.multipleValues') : ''"
+            :value="shown('cueAdvance.targetUuid', cueAdvanceTargetUuid)"
+            :placeholder="mixed('cueAdvance.targetUuid') ? t('properties.multipleValues') : t('properties.cueAdvanceTargetPlaceholder')"
             type="text"
-            @change="onText('endBehavior.targetUuid')($event)"
+            @change="onText('cueAdvance.targetUuid')($event)"
           />
+          <p class="field-hint">{{ t('properties.cueAdvanceTargetHelp') }}</p>
         </div>
 
-        <div class="property-field" v-if="endBehaviorAction === 'goto-index'">
+        <div class="property-field" v-if="cueAdvanceAction !== 'no-action' && !cueAdvanceTargetUuid">
           <label>{{ t('properties.targetIndex') }}</label>
           <input
-            :value="shown('endBehavior.targetIndex', formatItemIndex(endBehaviorTargetIndex))"
-            :placeholder="mixed('endBehavior.targetIndex') ? t('properties.multipleValues') : ''"
-            @change="handleEndBehaviorIndexChange"
+            :value="shown('cueAdvance.targetIndex', formatItemIndex(cueAdvanceTargetIndex))"
+            :placeholder="mixed('cueAdvance.targetIndex') ? t('properties.multipleValues') : ''"
+            @change="handleCueAdvanceIndexChange"
             type="text"
           />
-        </div>
-
-        <!-- Wait before next (#8): a gap between this cue ending and the
-             next one starting. -->
-        <div
-          class="property-field"
-          v-if="selectedItem.type === 'audio' && ['next', 'goto-item', 'goto-index'].includes(endBehaviorAction)"
-        >
-          <label>{{ t('properties.advanceDelay') }}</label>
-          <input
-            type="number"
-            min="0"
-            step="0.5"
-            :value="shown('advanceDelay', (selectedItem as AudioItem).advanceDelay ?? 0)"
-            :placeholder="mixed('advanceDelay') ? t('properties.multipleValues') : ''"
-            @change="handleAdvanceDelayChange"
-          />
-          <p class="field-hint">{{ t('properties.advanceDelayHint') }}</p>
         </div>
       </div>
 
@@ -548,6 +552,7 @@ const allTabs = computed<Tab[]>(() => [
   // folder of cues is routed in one move and what its children inherit.
   { id: 'output', label: t('properties.output'), icon: 'speaker' },
   { id: 'ducking', label: t('properties.ducking'), icon: 'volume_down', audioOnly: true },
+  { id: 'cueAdvance', label: t('properties.cueAdvance'), icon: 'move_down', audioOnly: true },
   { id: 'startBehavior', label: t('properties.startBehavior'), icon: 'play_arrow' },
   { id: 'endBehavior', label: t('properties.endBehavior'), icon: 'stop_circle' }
 ]);
@@ -575,47 +580,37 @@ const endBehaviorAction = computed({
   }
 });
 
-const endBehaviorTargetUuid = computed({
-  get: () => {
-    if (selectedItem.value?.type === 'audio') {
-      return audioItem.value.endBehavior.targetUuid || '';
-    } else if (selectedItem.value?.type === 'group') {
-      return groupItem.value.endBehavior.targetUuid || '';
-    }
-    return '';
-  },
+// Cue Advance (audio only — see client/app/types/project.ts). Defaults to
+// 'start-advance' so a freshly-created item (which always carries one, see
+// DEFAULT_AUDIO_ITEM) never shows as unset; a loaded project's item always
+// has one too, via the server's migrate_cue_advance_locked.
+const cueAdvanceAction = computed({
+  get: () => audioItem.value?.cueAdvance?.action ?? 'start-advance',
   set: (value) => {
-    if (selectedItem.value?.type === 'audio') {
-      audioItem.value.endBehavior.targetUuid = value;
-    } else if (selectedItem.value?.type === 'group') {
-      groupItem.value.endBehavior.targetUuid = value;
-    }
+    if (!audioItem.value) return;
+    audioItem.value.cueAdvance = { ...(audioItem.value.cueAdvance ?? {}), action: value as any };
   }
 });
 
-const endBehaviorTargetIndex = computed(() => {
-  if (selectedItem.value?.type === 'audio') {
-    return audioItem.value.endBehavior.targetIndex;
-  } else if (selectedItem.value?.type === 'group') {
-    return groupItem.value.endBehavior.targetIndex;
+const cueAdvanceTargetUuid = computed({
+  get: () => audioItem.value?.cueAdvance?.targetUuid || '',
+  set: (value) => {
+    if (!audioItem.value) return;
+    audioItem.value.cueAdvance = { ...(audioItem.value.cueAdvance ?? { action: 'start-advance' }), targetUuid: value };
   }
-  return undefined;
 });
 
-const handleEndBehaviorIndexChange = (e: Event) => {
+const cueAdvanceTargetIndex = computed(() => audioItem.value?.cueAdvance?.targetIndex);
+
+const handleCueAdvanceIndexChange = (e: Event) => {
   const input = e.target as HTMLInputElement;
   const parsed = parseItemIndexInput(input.value);
-  // Reflect the normalised path back into the field so the user sees the
-  // canonical comma form (e.g. typing "1.10" shows "1,10").
   input.value = formatItemIndex(parsed);
-  touch('endBehavior.targetIndex');
-  if (selectedItem.value?.type === 'audio') {
-    if (parsed.length > 0) audioItem.value.endBehavior.targetIndex = parsed;
-    else delete audioItem.value.endBehavior.targetIndex;
-  } else if (selectedItem.value?.type === 'group') {
-    if (parsed.length > 0) groupItem.value.endBehavior.targetIndex = parsed;
-    else delete groupItem.value.endBehavior.targetIndex;
-  }
+  touch('cueAdvance.targetIndex');
+  if (!audioItem.value) return;
+  const next = { ...(audioItem.value.cueAdvance ?? { action: 'start-advance' }) } as any;
+  if (parsed.length > 0) next.targetIndex = parsed; else delete next.targetIndex;
+  audioItem.value.cueAdvance = next;
   handleSave();
 };
 
@@ -915,16 +910,6 @@ const handleStopFadeUpdate = (value: number) => {
       (item as AudioItem).stopFade = value;
     }
   });
-};
-
-const handleAdvanceDelayChange = (event: Event) => {
-  const seconds = parseFloat((event.target as HTMLInputElement).value);
-  const value = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
-  touch('advanceDelay');
-  getSelectedItems().forEach(item => {
-    if (item.type === 'audio') (item as AudioItem).advanceDelay = value;
-  });
-  handleSave();
 };
 
 const handleLoopCrossfadeUpdate = (value: number) => {

@@ -2,14 +2,27 @@
   <div class="playback-controls" :class="{ 'show-mode': showMode }">
     <div class="controls-left">
       <button
-        class="control-btn play-next-btn"
-        :class="{ 'has-next': !!effectiveNextUuid }"
+        class="control-btn head-step-btn"
+        @click="selectPrev"
+        :title="t('controls.selectUp')"
+      >
+        <span class="material-symbols-rounded">skip_previous</span>
+      </button>
+      <button
+        class="control-btn head-step-btn"
+        @click="selectNext"
+        :title="t('controls.selectDown')"
+      >
+        <span class="material-symbols-rounded">skip_next</span>
+      </button>
+      <button
+        class="control-btn go-btn"
         @click="handlePlayNext"
         :disabled="!effectiveNextUuid"
         :title="playNextTooltip"
       >
-        <span class="material-symbols-rounded">fast_forward</span>
-        <span>{{ t('controls.playNext') }}</span>
+        <span class="material-symbols-rounded">play_arrow</span>
+        <span>{{ t('controls.go') }}</span>
         <span v-if="nextInSeconds !== null" class="next-in-badge">
           {{ t('controls.nextIn', { seconds: nextInSeconds }) }}
         </span>
@@ -117,8 +130,10 @@ import { useCueMeters } from '~/composables/useLiveMeters';
 import { FADER_MIN_DB, FADER_MAX_DB } from '~/utils/meterScale';
 import VolumeSlider from './VolumeSlider.vue';
 
-const { activeCues, panicStop, nextItemOverrideUuid, autoNextItemUuid, setNextItem, playCue, triggerGroup } = useAudioEngine();
+const { activeCues, panicStop, triggerByUuid } = useAudioEngine();
 const { findItemByUuid, previewItemUuid, previewCueId, stopPreview, advancePending } = useProject();
+// The head — see the Head pointer + Cue Advance plan. This button is GO.
+const { selectedItemUuid, selectPrev, selectNext } = useShowControl();
 
 // "Wait before next" countdown (#8). The server owns the wait and announces
 // it; this only ticks a clock while one is running.
@@ -240,12 +255,12 @@ const previewingItem = computed(() => {
   return findItemByUuid(uuid);
 });
 
-const effectiveNextUuid = computed(() => nextItemOverrideUuid.value ?? autoNextItemUuid.value);
+const effectiveNextUuid = computed(() => selectedItemUuid.value);
 
 const playNextTooltip = computed(() => {
   const binding = playbackMappings.value['play-next'];
   const shortcut = binding ? formatKeyLabel(binding) : '';
-  return shortcut ? `${t('controls.playNext')} (${shortcut})` : t('controls.playNext');
+  return shortcut ? `${t('controls.go')} (${shortcut})` : t('controls.go');
 });
 
 const stopAllTooltip = computed(() => {
@@ -318,11 +333,7 @@ function resetOutputGain(leftIndex: number, rightIndex: number) {
 const handlePlayNext = () => {
   const uuid = effectiveNextUuid.value;
   if (!uuid) return;
-  const item = findItemByUuid(uuid);
-  if (!item) return;
-  if (nextItemOverrideUuid.value) setNextItem(null);
-  if (item.type === 'audio') playCue(item as AudioItem);
-  else if (item.type === 'group') triggerGroup(item);
+  triggerByUuid(uuid);
 };
 </script>
 
@@ -394,20 +405,23 @@ const handlePlayNext = () => {
   }
 }
 
-.play-next-btn {
+.head-step-btn {
+  padding: var(--spacing-md);
   color: var(--color-text-secondary);
 
-  &.has-next {
-    background-color: var(--color-warning);
-    border-color: var(--color-warning);
-    color: black;
-    font-weight: 600;
+  .material-symbols-rounded { font-size: 20px; }
+}
 
-    &:hover:not(:disabled) {
-      background-color: var(--color-warning);
-      border-color: var(--color-warning);
-      filter: brightness(0.88);
-    }
+.go-btn {
+  background-color: var(--color-success);
+  border-color: var(--color-success);
+  color: black;
+  font-weight: 600;
+
+  &:hover:not(:disabled) {
+    background-color: var(--color-success);
+    border-color: var(--color-success);
+    filter: brightness(0.9);
   }
 }
 
