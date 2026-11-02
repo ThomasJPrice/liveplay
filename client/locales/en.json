@@ -202,7 +202,10 @@
     "importHint": "Drag audio files here, or use Import Audio",
     "busRouted": "Routed to {name}",
     "busRoutedMissing": "Routed to a missing bus",
-    "newGroup": "New Group"
+    "newGroup": "New Group",
+    "addEmptyAudio": "Add Empty Audio",
+    "addEmptyAudioHelp": "Adds a placeholder cue with no audio file — GO / Play Next skips straight over it. Useful as a marker for a cue fired from elsewhere, e.g. a pyro effect triggered via Companion.",
+    "newEmptyAudio": "Empty Cue"
   },
   "cart": {
     "title": "Cart Player",
@@ -272,6 +275,9 @@
     "media": "Media",
     "replace": "Replace File",
     "basicInfo": "Basic Info",
+    "notes": "Notes",
+    "notesPlaceholder": "Calling notes for this cue…",
+    "notesHelp": "Shown in the Notes bar while this cue is playing or queued as Up Next.",
     "loadingAudioData": "Loading audio data…",
     "playback": "Playback",
     "output": "Output",
@@ -469,6 +475,7 @@
     "fieldEndBehaviour": "End Behaviour",
     "fieldBus": "Bus",
     "fieldVolume": "Volume",
+    "fieldNotes": "Notes",
     "fieldEmpty": "(none)",
     "errorMissingColumn": "The sheet is missing its \"{column}\" column.",
     "errorBadLevel": "Level must be a number.",
@@ -1142,5 +1149,17 @@
     "barHint": "{pane}: click or drag to open",
     "emptyTitle": "All panes are collapsed",
     "emptyHint": "Click or drag a bar at the edge, or use the buttons at the top, to open a pane."
+  },
+  "callingBars": {
+    "clocksTitle": "Clocks",
+    "notesTitle": "Notes",
+    "time": "Time",
+    "elapsed": "Elapsed",
+    "remaining": "Remaining",
+    "noActiveCues": "No active cues",
+    "nowPlaying": "Now Playing",
+    "upNext": "Up Next",
+    "noneQueued": "Nothing queued",
+    "noNote": "No note"
   }
 }

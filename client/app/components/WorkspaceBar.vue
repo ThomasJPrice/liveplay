@@ -44,9 +44,10 @@ const { t } = useLocalization();
 const { panes, isDetached, togglePane } = useWorkspaceLayout();
 
 const PANES: { id: PaneId; icon: string; labelKey: string }[] = [
-  { id: 'playlist', icon: 'queue_music', labelKey: 'playlist.title' },
-  { id: 'cart',     icon: 'grid_view',   labelKey: 'cart.title' },
-  { id: 'mixer',    icon: 'instant_mix', labelKey: 'mixer.title' },
+  { id: 'playlist', icon: 'queue_music',     labelKey: 'playlist.title' },
+  { id: 'notes',    icon: 'sticky_note_2',   labelKey: 'callingBars.notesTitle' },
+  { id: 'cart',     icon: 'grid_view',       labelKey: 'cart.title' },
+  { id: 'mixer',    icon: 'instant_mix',     labelKey: 'mixer.title' },
 ];
 
 function tileTitle(p: { id: PaneId; labelKey: string }): string {

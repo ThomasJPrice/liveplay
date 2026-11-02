@@ -27,7 +27,7 @@ export const SHEET_COLUMNS = [
   'UUID', 'Level', 'Type', 'Name', 'Colour',
   'Start Behaviour', 'Start Target',
   'End Behaviour', 'End Target',
-  'Bus', 'Volume', 'Media File', 'Duration',
+  'Bus', 'Volume', 'Media File', 'Duration', 'Notes',
 ] as const;
 
 const COL = Object.fromEntries(SHEET_COLUMNS.map((c, i) => [c, i])) as Record<typeof SHEET_COLUMNS[number], number>;
@@ -115,6 +115,7 @@ export function useSheetSync() {
         row[COL['Type']] = typeFor(item, level);
         row[COL['Name']] = item.displayName ?? '';
         row[COL['Colour']] = item.color ?? '';
+        row[COL['Notes']] = item.notes ?? '';
 
         if (item.type === 'group') {
           row[COL['Start Behaviour']] = item.startBehavior?.action ?? 'play-first';
@@ -188,6 +189,7 @@ export function useSheetSync() {
     busName: string;
     volume: string;
     mediaFile: string;
+    notes: string;
   }
 
   function parseRows(header: string[], rawRows: string[][]): { parsed: ParsedRow[]; errors: SheetRowError[] } {
@@ -228,6 +230,7 @@ export function useSheetSync() {
         busName: get(row, 'Bus'),
         volume: get(row, 'Volume'),
         mediaFile: get(row, 'Media File'),
+        notes: get(row, 'Notes'),
       };
     });
     return { parsed, errors };
@@ -329,6 +332,10 @@ export function useSheetSync() {
       };
       if (row.name && row.name !== item!.displayName) { record('displayName', item!.displayName, row.name); item!.displayName = row.name; }
       if (row.colour && row.colour !== item!.color) { record('color', item!.color, row.colour); item!.color = row.colour; }
+      // Same convention as name/colour: an empty Notes cell means "untouched"
+      // (a sheet can't distinguish "blank on purpose" from "never filled in"),
+      // not "clear the note" — clearing stays a Properties-panel action.
+      if (row.notes && row.notes !== (item!.notes ?? '')) { record('notes', item!.notes, row.notes); item!.notes = row.notes; }
 
       if (item!.type === 'group') {
         const g = item as GroupItem;

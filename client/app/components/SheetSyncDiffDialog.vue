@@ -99,6 +99,7 @@ const FIELD_LABELS: Record<string, string> = {
   endBehavior: 'sheetSync.fieldEndBehaviour',
   busId: 'sheetSync.fieldBus',
   volume: 'sheetSync.fieldVolume',
+  notes: 'sheetSync.fieldNotes',
 };
 function fieldLabel(field: string): string {
   const key = FIELD_LABELS[field];

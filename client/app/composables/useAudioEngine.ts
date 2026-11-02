@@ -174,6 +174,34 @@ export const useAudioEngine = () => {
     return null;
   };
 
+  // An "Add Empty Audio" placeholder cue (no mediaFileName — a marker for a
+  // cue fired from elsewhere, e.g. a pyro effect triggered via Companion)
+  // never gets a decoder loaded server-side (mirror_items_to_engine_locked
+  // skips any item whose resolved media path is empty), so play_item() on
+  // it is already a harmless no-op there. What it ISN'T, on its own, is
+  // "skipped" — GO just does nothing and the operator is stuck looking at
+  // it. Resolve forward through the structural running order (ignoring the
+  // placeholder's own End Behaviour, which means nothing for a cue with no
+  // audio to end) until a real cue or a group is reached. The hop cap
+  // guards against a pathological unbroken run of placeholders.
+  const EMPTY_CUE_SKIP_LIMIT = 100;
+  const isEmptyAudioItem = (item: AudioItem | GroupItem | BaseItem | null): boolean =>
+    !!item && (item as any).type === 'audio' && !(item as AudioItem).mediaFileName;
+  const resolvePastEmptyCues = (
+    item: AudioItem | GroupItem | null
+  ): AudioItem | GroupItem | null => {
+    let current = item;
+    let hops = 0;
+    while (current && isEmptyAudioItem(current) && hops < EMPTY_CUE_SKIP_LIMIT) {
+      hops++;
+      const audio = current as AudioItem;
+      const nextIndex = [...audio.index];
+      nextIndex[nextIndex.length - 1]++;
+      current = findItemByIndex(nextIndex);
+    }
+    return current;
+  };
+
   // Build the trimmed (in→out) duration for an audio item.
   const trimmedDuration = (item: AudioItem): number => {
     const inP  = item.inPoint  || 0;
@@ -382,7 +410,7 @@ export const useAudioEngine = () => {
         case 'next': {
           const nextIndex = [...audioItem.index];
           nextIndex[nextIndex.length - 1]++;
-          const nextItem = findItemByIndex(nextIndex);
+          const nextItem = resolvePastEmptyCues(findItemByIndex(nextIndex));
           if (nextItem) return nextItem.uuid;
           break;
         }
@@ -391,11 +419,14 @@ export const useAudioEngine = () => {
           // so the UI reflects the end behaviour instead of showing nothing.
           return audioItem.uuid;
         case 'goto-item':
-          if (audioItem.endBehavior.targetUuid) return audioItem.endBehavior.targetUuid;
+          if (audioItem.endBehavior.targetUuid) {
+            const target = resolvePastEmptyCues(findItemByUuid(audioItem.endBehavior.targetUuid));
+            if (target) return target.uuid;
+          }
           break;
         case 'goto-index':
           if (audioItem.endBehavior.targetIndex) {
-            const target = findItemByIndex(audioItem.endBehavior.targetIndex);
+            const target = resolvePastEmptyCues(findItemByIndex(audioItem.endBehavior.targetIndex));
             if (target) return target.uuid;
           }
           break;
@@ -411,7 +442,7 @@ export const useAudioEngine = () => {
           (currentProject.value as any)?.settings?.autoCueNextWithoutEndBehavior !== false) {
         const nextIndex = [...audioItem.index];
         nextIndex[nextIndex.length - 1]++;
-        const nextItem = findItemByIndex(nextIndex);
+        const nextItem = resolvePastEmptyCues(findItemByIndex(nextIndex));
         if (nextItem) return nextItem.uuid;
       }
     }
@@ -589,19 +620,24 @@ export const useAudioEngine = () => {
   // ---- Transport intents (forward to server) -------------------------
   // Note: the server's WS `play` handler routes to trigger_item, which
   // dispatches audio→play_item and group→walk-startBehavior. So a single
-  // playItem(uuid) is enough for both kinds of items.
+  // playItem(uuid) is enough for both kinds of items — including a group
+  // resolvePastEmptyCues lands on, since skipping past a placeholder may
+  // walk straight into a Scene/Block.
   const playCue = async (item: AudioItem): Promise<boolean> => {
     if (!item || !item.uuid) return false;
-    server.playItem(item.uuid);
+    const target = resolvePastEmptyCues(item);
+    if (!target) return false;
+    server.playItem(target.uuid);
     return true;
   };
   const triggerByUuid = (uuid: string) => {
     if (!uuid) return;
-    server.playItem(uuid);
+    const target = resolvePastEmptyCues(findItemByUuid(uuid));
+    if (target) server.playItem(target.uuid);
   };
   const triggerByIndex = (index: number[]) => {
-    const item = findItemByIndex(index);
-    if (item) server.playItem(item.uuid);
+    const target = resolvePastEmptyCues(findItemByIndex(index));
+    if (target) server.playItem(target.uuid);
   };
   const triggerGroup = (group: GroupItem) => {
     if (group?.uuid) server.playItem(group.uuid);

@@ -74,6 +74,21 @@
         </div>
       </div>
 
+      <!-- Notes Tab -->
+      <div v-if="activeTab === 'notes'" class="tab-panel">
+        <div class="property-field">
+          <label>{{ t('properties.notes') }}</label>
+          <textarea
+            class="property-textarea"
+            rows="6"
+            :value="shown('notes', selectedItem.notes || '')"
+            :placeholder="mixed('notes') ? t('properties.multipleValues') : t('properties.notesPlaceholder')"
+            @change="onTextarea('notes')($event)"
+          ></textarea>
+          <p class="property-help">{{ t('properties.notesHelp') }}</p>
+        </div>
+      </div>
+
       <!-- Media Tab -->
       <div v-if="activeTab === 'media' && selectedItem.type === 'audio'" class="tab-panel">
         <div class="property-field">
@@ -542,6 +557,9 @@ interface Tab {
 
 const allTabs = computed<Tab[]>(() => [
   { id: 'basic', label: t('properties.basicInfo'), icon: 'info' },
+  // Not audioOnly: a group (Scene/Block) can carry a calling note just as
+  // usefully as a cue can.
+  { id: 'notes', label: t('properties.notes'), icon: 'sticky_note_2' },
   { id: 'media', label: t('properties.media'), icon: 'audio_file', audioOnly: true },
   { id: 'playback', label: t('properties.playback'), icon: 'play_circle', audioOnly: true },
   // Not audioOnly: a group carries a bus assignment too, which is how a whole
@@ -685,6 +703,8 @@ const commitField = (path: string, value: unknown) => {
 };
 const onText = (path: string) => (e: Event) =>
   commitField(path, (e.target as HTMLInputElement).value);
+const onTextarea = (path: string) => (e: Event) =>
+  commitField(path, (e.target as HTMLTextAreaElement).value);
 const onColor = (color: string) => commitField('color', color);
 
 // The trimmer's own fields, mixed or not across the selection.
@@ -1214,7 +1234,8 @@ const formatTime = (seconds: number): string => {
 }
 
 .property-field input,
-.property-field select {
+.property-field select,
+.property-field textarea {
   width: 100%;
   padding: var(--spacing-sm);
   background-color: var(--color-background);
@@ -1232,6 +1253,12 @@ const formatTime = (seconds: number): string => {
     opacity: 0.6;
     cursor: default;
   }
+}
+
+.property-textarea {
+  font-family: inherit;
+  resize: vertical;
+  min-height: 80px;
 }
 
 .input-with-btn {
