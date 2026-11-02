@@ -62,7 +62,7 @@ import { useOutputTarget } from '~/composables/useOutputTarget';
 const { currentProject, addItem, consumePendingAutoProcess, updateIndices, saveProject, triggerWaveformUpdate, isLoading, getAllItemsFlat, resolveProjectPath, findItemByUuid, projectEpoch } = useProject();
 const { t } = useLocalization();
 const { levels: outputTargetLevels } = useOutputTarget();
-const { activeCues, nextItemOverrideUuid } = useAudioEngine();
+const { activeCues } = useAudioEngine();
 const { uiMode } = useUiMode();
 const { revealSelection, commitReveal, clearReveals } = usePlaylistReveal();
 // Same useState key useProject/useShowControl bind to — watching the uuid (not
@@ -192,17 +192,17 @@ watch(selectedItemUuid, (uuid) => {
   nextTick(() => scrollItemIntoView(uuid, 'nearest'));
 });
 
-// Playing a cue or arming one as Up Next is a commitment: the group it lives
+// Playing a cue or it becoming the head is a commitment: the group it lives
 // in stops being a temporary peek and becomes normally expanded, staying open
-// until the operator collapses it by hand. nextItemOverrideUuid covers both an
-// operator arming and the server's own arming after a cue ends.
+// until the operator collapses it by hand. selectedItemUuid covers every way
+// the head moves — a click, PREV/NEXT, or a cue's own Start/End Advance/Play.
 // Keyed on the joined uuids, not the array: activeCues is rewritten on every
 // playhead tick, and an array getter would re-fire the tree walk ~20x/sec.
 watch(
   () => [...activeCues.value.keys()].join('|'),
   (keys) => { for (const uuid of keys.split('|')) if (uuid) commitReveal(uuid); },
 );
-watch(nextItemOverrideUuid, (uuid) => {
+watch(selectedItemUuid, (uuid) => {
   if (uuid) commitReveal(uuid);
 });
 

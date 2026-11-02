@@ -112,8 +112,10 @@ const preferredDevice = computed(() => config.value.preferredDevice ?? null);
 
 export const useMidiController = () => {
   const { getCartItem } = useCartItems();
-  const { playCue, stopCue, pauseCue, resumeCue, stopAllCues, activeCues, setMasterGain, masterGainDb, nextItemOverrideUuid, autoNextItemUuid, setNextItem, triggerGroup, queueLoopContinuation, jumpCue, isItemPlaying, fireItem, stopItemAny } = useAudioEngine();
-  const { selectedItem, selectedItems, saveProject, currentProject, getAllItemsFlat, toggleItemSelection, findItemByUuid: findProjectItem, findItemByIndex } = useProject();
+  const { playCue, stopCue, pauseCue, resumeCue, stopAllCues, activeCues, setMasterGain, masterGainDb, triggerByUuid, queueLoopContinuation, jumpCue, isItemPlaying, fireItem, stopItemAny } = useAudioEngine();
+  const { selectedItem, saveProject } = useProject();
+  // The head — see the Head pointer + Cue Advance plan.
+  const { selectedItemUuid, selectPrev, selectNext } = useShowControl();
 
   // Same active-cue-then-selection fallback toggle-loop/pause-resume use
   // above, factored out since cue-to-continue/jump-cue need it too.
@@ -239,43 +241,17 @@ export const useMidiController = () => {
       return;
     }
 
+    // PREV / NEXT: step the server-authoritative head (handles play-first
+    // group redirect and empty-cue skip) — not a local array walk.
     if (actionId === 'select-up' || actionId === 'select-down') {
-      const project = currentProject.value;
-      if (!project) return;
-      const all = getAllItemsFlat(project.items);
-      if (all.length === 0) return;
-      if (!selectedItem.value) {
-        toggleItemSelection(all[0].uuid, false, false);
-        return;
-      }
-      const idx = all.findIndex(i => i.uuid === selectedItem.value!.uuid);
-      if (actionId === 'select-up' && idx > 0) {
-        toggleItemSelection(all[idx - 1].uuid, false, false);
-      } else if (actionId === 'select-down' && idx < all.length - 1) {
-        toggleItemSelection(all[idx + 1].uuid, false, false);
-      } else if (idx === -1) {
-        toggleItemSelection(all[0].uuid, false, false);
-      }
+      if (actionId === 'select-up') selectPrev(); else selectNext();
       return;
     }
 
-    if (actionId === 'play-selected') {
-      const uuid = Array.from(selectedItems.value).pop();
-      if (!uuid) return;
-      const item = findProjectItem(uuid);
-      if (!item || item.type !== 'audio') return;
-      playCue(item as import('~/types/project').AudioItem);
-      return;
-    }
-
-    if (actionId === 'play-next') {
-      const effectiveUuid = nextItemOverrideUuid.value ?? autoNextItemUuid.value;
-      if (!effectiveUuid) return;
-      const item = findProjectItem(effectiveUuid);
-      if (!item) return;
-      if (nextItemOverrideUuid.value) setNextItem(null);
-      if (item.type === 'audio') playCue(item as import('~/types/project').AudioItem);
-      else if (item.type === 'group') triggerGroup(item);
+    // GO, whichever MIDI action fires it: play the head.
+    if (actionId === 'play-selected' || actionId === 'play-next') {
+      if (!selectedItemUuid.value) return;
+      triggerByUuid(selectedItemUuid.value);
       return;
     }
   };

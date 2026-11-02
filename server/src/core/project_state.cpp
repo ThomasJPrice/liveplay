@@ -2345,6 +2345,7 @@ bool ProjectState::replace_full_document(const json& doc) {
         // the new one would resolve against stale definitions.
         load_buses_locked();
         write_buses_to_document_locked();
+        migrate_cue_advance_locked();
         // Nothing about the buses moved, and every one of them already has a
         // strip: there is nothing to rebuild.
         //
@@ -2973,13 +2974,156 @@ std::vector<std::string> ProjectState::flat_item_uuids_locked() const {
         for (const auto& it : arr) {
             if (!it.is_object()) continue;
             const auto uuid = it.value("uuid", std::string{});
-            if (!uuid.empty()) out.push_back(uuid);
-            if (it.value("type", std::string{}) == "group" && it.contains("children"))
+            const bool is_group = it.value("type", std::string{}) == "group";
+            // A play-first group's own uuid aliases its first child — that's
+            // what resolve_selection_target_locked redirects it to, and what
+            // actually plays when the group is triggered. Giving the header
+            // its own stop here made PREV bounce in place: stepping onto it
+            // from the first child resolved straight back to that child, so
+            // selected_item_uuid_ never changed and the broadcast never fired
+            // (set_selected_item no-ops when the resolved uuid is unchanged).
+            // Leaving it out of the list means PREV/NEXT skip straight past
+            // the whole group to whatever's really before/after it. A
+            // play-all group is a genuinely distinct target (triggering it
+            // plays every child, not just one), so it keeps its own stop.
+            std::string start_action = "play-first";
+            if (is_group && it.contains("startBehavior") && it["startBehavior"].is_object())
+                start_action = it["startBehavior"].value("action", std::string{"play-first"});
+            if (!uuid.empty() && !(is_group && start_action == "play-first")) out.push_back(uuid);
+            if (is_group && it.contains("children"))
                 walk(it["children"]);
         }
     };
     walk(document_["items"]);
     return out;
+}
+
+// Derives cueAdvance from an item's old endBehavior:
+//   'next'                -> { action: 'end-play' }                    (what 'next' already did — play on end)
+//   'goto-item'/-'index'   -> { action: 'end-play', target... }
+//   'loop'                 -> { action: 'no-action' }                  (looping isn't a head concept; endBehavior keeps 'loop')
+//   anything else          -> { action: 'start-advance' }  for a playlist item (MultiPlay's own default)
+//                             { action: 'no-action' }       for a cart item (not part of the flat playlist sequence)
+// endBehavior's own 'next'/'goto-item'/'goto-index' are cleared to 'nothing'
+// once migrated — their advancing meaning now lives in cueAdvance only, so
+// leaving the old values in place would be stale, misleading data.
+static void migrate_cue_advance_item(json& item, bool is_cart) {
+    if (item.value("type", std::string{}) != "audio") return;
+    if (item.contains("cueAdvance") && item["cueAdvance"].is_object()) return;  // already migrated
+
+    std::string eb_action = "nothing";
+    std::string eb_target_uuid;
+    json eb_target_index = json::array();
+    if (item.contains("endBehavior") && item["endBehavior"].is_object()) {
+        const auto& eb = item["endBehavior"];
+        eb_action      = eb.value("action", std::string{"nothing"});
+        eb_target_uuid = eb.value("targetUuid", std::string{});
+        if (eb.contains("targetIndex") && eb["targetIndex"].is_array())
+            eb_target_index = eb["targetIndex"];
+    }
+
+    json advance = json::object();
+    if (eb_action == "next") {
+        advance["action"] = "end-play";
+    } else if (eb_action == "goto-item" && !eb_target_uuid.empty()) {
+        advance["action"]    = "end-play";
+        advance["targetUuid"] = eb_target_uuid;
+    } else if (eb_action == "goto-index" && !eb_target_index.empty()) {
+        advance["action"]     = "end-play";
+        advance["targetIndex"] = eb_target_index;
+    } else if (eb_action == "loop") {
+        advance["action"] = "no-action";
+    } else {
+        advance["action"] = is_cart ? "no-action" : "start-advance";
+    }
+    item["cueAdvance"] = advance;
+
+    if (eb_action == "next" || eb_action == "goto-item" || eb_action == "goto-index") {
+        item["endBehavior"] = json{{"action", "nothing"}};
+    }
+}
+
+void ProjectState::migrate_cue_advance_locked() {
+    std::function<void(json&)> walk_playlist = [&](json& arr) {
+        if (!arr.is_array()) return;
+        for (auto& it : arr) {
+            if (!it.is_object()) continue;
+            migrate_cue_advance_item(it, /*is_cart=*/false);
+            if (it.value("type", std::string{}) == "group" && it.contains("children"))
+                walk_playlist(it["children"]);
+        }
+    };
+    if (document_.contains("items")) walk_playlist(document_["items"]);
+
+    if (document_.contains("cartOnlyItems") && document_["cartOnlyItems"].is_array()) {
+        for (auto& it : document_["cartOnlyItems"]) {
+            if (it.is_object()) migrate_cue_advance_item(it, /*is_cart=*/true);
+        }
+    }
+}
+
+std::string ProjectState::structural_next_locked(const std::string& uuid) const {
+    const auto flat = flat_item_uuids_locked();
+    const auto it = std::find(flat.begin(), flat.end(), uuid);
+    if (it == flat.end() || std::next(it) == flat.end()) return {};
+    return *std::next(it);
+}
+
+json* ProjectState::find_item_json_locked(const std::string& uuid) {
+    if (uuid.empty()) return nullptr;
+    json* found = nullptr;
+    std::function<void(json&)> walk = [&](json& arr) {
+        if (found || !arr.is_array()) return;
+        for (auto& it : arr) {
+            if (found) return;
+            if (!it.is_object()) continue;
+            if (it.value("uuid", std::string{}) == uuid) { found = &it; return; }
+            if (it.value("type", std::string{}) == "group" && it.contains("children"))
+                walk(it["children"]);
+        }
+    };
+    if (document_.contains("items")) walk(document_["items"]);
+    if (!found && document_.contains("cartOnlyItems")) walk(document_["cartOnlyItems"]);
+    return found;
+}
+
+std::string ProjectState::resolve_selection_target_locked(const std::string& uuid) {
+    std::string current = uuid;
+    for (int hops = 0; hops < 100 && !current.empty(); ++hops) {
+        json* found = find_item_json_locked(current);
+        if (!found) return current;  // unknown uuid — leave it to the caller
+        const auto type = found->value("type", std::string{});
+
+        if (type == "group") {
+            std::string start_action = "play-first";
+            if (found->contains("startBehavior") && (*found)["startBehavior"].is_object())
+                start_action = (*found)["startBehavior"].value("action", std::string{"play-first"});
+            // play-all stays as itself — triggering it is a genuinely distinct,
+            // intentional target, not a stand-in for any one child.
+            if (start_action != "play-first") return current;
+            if (!found->contains("children") || !(*found)["children"].is_array() ||
+                (*found)["children"].empty())
+                return current;  // empty group — nothing to redirect to
+            const auto first_uuid = (*found)["children"][0].value("uuid", std::string{});
+            if (first_uuid.empty()) return current;
+            current = first_uuid;
+            continue;
+        }
+
+        if (type == "audio") {
+            const auto path = resolve_media_path(*found, document_.value("folderPath", std::string{}));
+            if (!path.empty()) return current;  // has real media — this is the target
+            // "Add Empty Audio" placeholder (no resolvable media): skip to
+            // whatever's next in flat document order.
+            const auto next = structural_next_locked(current);
+            if (next.empty()) return current;  // nothing after it
+            current = next;
+            continue;
+        }
+
+        return current;  // anything else (e.g. 'action' items) — leave as-is
+    }
+    return current;
 }
 
 // Public thread-safe wrapper: resolve an index path to an item uuid.
@@ -3023,6 +3167,9 @@ bool ProjectState::play_item(const std::string& uuid,
     std::string  end_behavior_action;
     std::string  end_behavior_target_uuid;
     std::vector<int> end_behavior_target_index;
+    std::string  cue_advance_action;
+    std::string  cue_advance_target_uuid;
+    std::vector<int> cue_advance_target_index;
     audio::CueId target_cue;
     std::vector<audio::CueId> other_cues;
 
@@ -3086,6 +3233,17 @@ bool ProjectState::play_item(const std::string& uuid,
                     for (const auto& v : eb["targetIndex"]) {
                         if (v.is_number_integer())
                             end_behavior_target_index.push_back(v.get<int>());
+                    }
+                }
+            }
+            if (found->contains("cueAdvance") && (*found)["cueAdvance"].is_object()) {
+                const auto& ca = (*found)["cueAdvance"];
+                cue_advance_action       = ca.value("action",     std::string{});
+                cue_advance_target_uuid  = ca.value("targetUuid", std::string{});
+                if (ca.contains("targetIndex") && ca["targetIndex"].is_array()) {
+                    for (const auto& v : ca["targetIndex"]) {
+                        if (v.is_number_integer())
+                            cue_advance_target_index.push_back(v.get<int>());
                     }
                 }
             }
@@ -3334,6 +3492,38 @@ bool ProjectState::play_item(const std::string& uuid,
         play_item(start_behavior_target_uuid);
     }
 
+    // Cue Advance (Start): moves the head the moment THIS cue starts, and for
+    // "start-play" also plays the target immediately — MultiPlay's "Start
+    // Advance" / "Start Play". Target resolution mirrors endBehavior's own
+    // precedence: explicit targetUuid, then targetIndex, then structural next
+    // (flat document order, same list step_selection walks).
+    if (cue_advance_action == "start-advance" || cue_advance_action == "start-play") {
+        std::string target;
+        {
+            std::lock_guard lock{mutex_};
+            if (!cue_advance_target_uuid.empty()) {
+                target = cue_advance_target_uuid;
+            } else if (!cue_advance_target_index.empty()) {
+                target = resolve_index_path_locked(cue_advance_target_index);
+            } else {
+                target = structural_next_locked(uuid);
+            }
+            // Resolve once so the head and what we're about to trigger (for
+            // start-play) always agree — play-first group redirect / empty-
+            // cue skip, same rule set_selected_item applies to every caller.
+            if (!target.empty()) target = resolve_selection_target_locked(target);
+        }
+        if (!target.empty()) {
+            set_selected_item(target);
+            // Guards the immediate self-reference case (a cue chained to
+            // itself). A longer start-play cycle across several cues isn't
+            // fully guarded — avoid configuring one.
+            if (cue_advance_action == "start-play" && target != uuid) {
+                trigger_item(target);
+            }
+        }
+    }
+
     return true;
   } catch (const std::exception& e) {
     Logger::error("ProjectState::play_item('{}') failed: {}", uuid, e.what());
@@ -3492,13 +3682,15 @@ std::string ProjectState::selected_item_uuid() const {
 
 bool ProjectState::set_selected_item(const std::string& uuid) {
     std::function<void(const json&)> cb;
+    std::string resolved;
     {
         std::lock_guard lock{mutex_};
-        if (selected_item_uuid_ == uuid) return false;
-        selected_item_uuid_ = uuid;
+        resolved = uuid.empty() ? uuid : resolve_selection_target_locked(uuid);
+        if (selected_item_uuid_ == resolved) return false;
+        selected_item_uuid_ = resolved;
         cb = ui_state_broadcaster_;
     }
-    if (cb) cb(json{{"type", "doc_patch"}, {"op", "selection_changed"}, {"itemUuid", uuid}});
+    if (cb) cb(json{{"type", "doc_patch"}, {"op", "selection_changed"}, {"itemUuid", resolved}});
     return true;
 }
 
@@ -3540,7 +3732,11 @@ std::string ProjectState::step_selection(int delta,
         }
     }
     set_selected_item(target);
-    return target;
+    // set_selected_item resolves `target` further (play-first redirect /
+    // empty-cue skip) before storing it — return what was actually stored,
+    // not the pre-resolution candidate, so callers (the HTTP/WS response)
+    // never report a uuid that isn't really the selection.
+    return selected_item_uuid();
 }
 
 bool ProjectState::show_mode() const {
@@ -3613,7 +3809,6 @@ json ProjectState::state_summary() const {
     std::unordered_map<std::string, ItemFacts> facts;
     // uuid → (cue, duration from decode metadata)
     std::vector<std::tuple<std::string, audio::CueId, double>> cue_pairs;
-    std::string override_uuid;
     std::string selected_uuid;
     bool        show_mode_now = false;
     std::string locale_now;
@@ -3691,7 +3886,6 @@ json ProjectState::state_summary() const {
             cue_pairs.emplace_back(uuid, cue, duration);
         }
 
-        override_uuid = next_item_override_;
         selected_uuid = selected_item_uuid_;
         show_mode_now = show_mode_;
         locale_now    = default_ui_locale_;
@@ -3758,17 +3952,16 @@ json ProjectState::state_summary() const {
         playing.push_back(std::move(entry));
     }
 
-    // Effective "Up Next": user override first, else derived from the
-    // currently-playing item's endBehavior (client GO-button parity).
-    std::string next_uuid   = override_uuid;
-    std::string next_source = next_uuid.empty() ? "" : "override";
-    if (next_uuid.empty() && !on_air.empty()) {
-        std::lock_guard lock{mutex_};
-        for (const auto& e : on_air) {
-            const auto n = resolve_next_item_locked(e.uuid);
-            if (!n.empty()) { next_uuid = n; next_source = "auto"; break; }
-        }
-    }
+    // Effective "Up Next" = the head (selected_item_uuid_), the same target
+    // GO plays. This used to be a separate override/endBehavior-derived
+    // guess; Cue Advance now keeps selected_item_uuid_ itself up to date on
+    // every Start/End Advance or Play (see play_item/run_end_behaviour), so
+    // "next" and "selection" are the same thing. Kept as its own field
+    // (rather than folded away) purely so existing control-surface wiring
+    // built against this shape — e.g. the Companion module's next_* / GO
+    // preset — keeps reporting something meaningful without any changes.
+    std::string next_uuid   = selected_uuid;
+    std::string next_source = next_uuid.empty() ? "" : "selection";
     json next = nullptr;
     if (!next_uuid.empty()) {
         next = json{{"itemUuid", next_uuid}, {"source", next_source}};
@@ -3865,44 +4058,19 @@ json ProjectState::state_summary() const {
     };
 }
 
+// GO now plays the persistent head (selected_item_uuid_ — see
+// set_selected_item/step_selection), the same target play_selected()
+// triggers. This used to derive a target from next_item_override_ / each
+// on-air item's endBehavior; that whole derivation is superseded by Cue
+// Advance (project_state.cpp's play_item/run_end_behaviour), which now
+// keeps selected_item_uuid_ itself up to date on every Start/End Advance or
+// Play. next_item_override_ and resolve_next_item_locked are left in place
+// (still used for cue pre-warming and the #28-era auto-arm-on-stop path) but
+// no longer drive GO, so the two can't disagree about what "next" means.
 std::string ProjectState::go() {
-    std::string target;
-    {
-        std::lock_guard lock{mutex_};
-        target = next_item_override_;
-    }
-    const bool from_override = !target.empty();
-
-    if (target.empty()) {
-        // No override armed — derive from the currently-playing item's
-        // endBehavior, the same fallback the client's GO button uses.
-        std::vector<std::pair<std::string, audio::CueId>> pairs;
-        {
-            std::lock_guard lock{mutex_};
-            pairs.reserve(item_uuid_to_cue_.size());
-            for (const auto& [u, c] : item_uuid_to_cue_) pairs.emplace_back(u, c);
-        }
-        std::vector<std::string> on_air;
-        for (const auto& [u, c] : pairs) {
-            if (auto* pi = engine_.find_cue(c)) {
-                if (pi->stats().transport != audio::TransportState::Stopped)
-                    on_air.push_back(u);
-            }
-        }
-        {
-            std::lock_guard lock{mutex_};
-            for (const auto& u : on_air) {
-                const auto n = resolve_next_item_locked(u);
-                if (!n.empty()) { target = n; break; }
-            }
-        }
-    }
-
+    const auto target = selected_item_uuid();
     if (target.empty()) return {};
     if (!trigger_item(target)) return {};
-    // Consume the override only after a successful trigger so a GO against a
-    // not-yet-loaded item doesn't silently disarm the operator's choice.
-    if (from_override) set_next_item_override("");
     return target;
 }
 
@@ -7233,6 +7401,7 @@ bool ProjectState::load_from_json(const json& doc_in) {
             // from here on. Strips are created after the lock is released.
             load_buses_locked();
             write_buses_to_document_locked();
+            migrate_cue_advance_locked();
             // Ensure required top-level keys exist (migrate older client saves).
             if (!document_.contains("settings") || !document_["settings"].is_object()) {
                 // Deliberately no defaultOutputDevice and no ltcDevice:
@@ -8053,6 +8222,7 @@ void ProjectState::arm_next_after_stop(const std::string& stopped_uuid,
 
 void ProjectState::arm_first_item_on_open() {
     std::string first;
+    bool already_selected = false;
     {
         std::lock_guard lock{mutex_};
         if (document_.contains("settings") && document_["settings"].is_object()) {
@@ -8061,7 +8231,8 @@ void ProjectState::arm_first_item_on_open() {
                 s["autoCueNextWithoutEndBehavior"].is_boolean() &&
                 !s["autoCueNextWithoutEndBehavior"].get<bool>()) return;
         }
-        if (!next_item_override_.empty()) return;  // already armed
+        already_selected = !selected_item_uuid_.empty();
+        if (!next_item_override_.empty() && already_selected) return;  // already armed/selected
         // Don't clobber a rejoined running session.
         for (auto& [_, c] : cues_) {
             if (auto* pi = engine_.find_cue(c.id)) {
@@ -8071,7 +8242,13 @@ void ProjectState::arm_first_item_on_open() {
         }
         first = first_playable_item_uuid_locked();
     }
-    if (!first.empty()) set_next_item_override(first, /*manual=*/false);
+    if (first.empty()) return;
+    if (!already_selected) {
+        // The new head: GO on a freshly-opened project should play the first
+        // cue, same as arming it below used to make the old GO derive.
+        set_selected_item(first);
+    }
+    set_next_item_override(first, /*manual=*/false);
 }
 
 void ProjectState::handle_item_ended(const SequencedItem& item) {
@@ -8161,10 +8338,17 @@ void ProjectState::broadcast_advance_pending(const std::string& from_uuid, long 
 }
 
 void ProjectState::run_end_behaviour(const SequencedItem& item) {
-    // Read end-behaviour from the document.
+    // Read end-behaviour AND cueAdvance from the document — cueAdvance is
+    // checked first (below) and, when it applies, takes over entirely; the
+    // endBehavior dispatch that follows is now reached only by 'loop',
+    // 'nothing', or a not-yet-migrated project's stray 'next'/'goto-item'/
+    // 'goto-index' (kept as a defensive fallback, not a live write path).
     std::string      end_action;
     std::string      target_uuid;
     std::vector<int> target_index;   // index *path* through the item tree
+    std::string      cue_advance_action;
+    std::string      cue_advance_target_uuid;
+    std::vector<int> cue_advance_target_index;
     {
         std::lock_guard lock{mutex_};
         json* found = nullptr;
@@ -8200,6 +8384,55 @@ void ProjectState::run_end_behaviour(const SequencedItem& item) {
                 }
             }
         }
+        if (found && found->contains("cueAdvance") && (*found)["cueAdvance"].is_object()) {
+            const auto& ca = (*found)["cueAdvance"];
+            cue_advance_action      = ca.value("action",     std::string{});
+            cue_advance_target_uuid = ca.value("targetUuid", std::string{});
+            if (ca.contains("targetIndex") && ca["targetIndex"].is_array()) {
+                for (const auto& v : ca["targetIndex"]) {
+                    if (v.is_number_integer()) cue_advance_target_index.push_back(v.get<int>());
+                }
+            }
+        }
+    }
+
+    // Cue Advance (End): moves the head when this cue naturally ends, and
+    // for "end-play" plays the target too — MultiPlay's "End Advance" /
+    // "End Play" (the latter is what LP's old endBehavior 'next' always
+    // did; this is the direct replacement, now also moving a real head).
+    if (cue_advance_action == "end-advance" || cue_advance_action == "end-play") {
+        std::string target;
+        {
+            std::lock_guard lock{mutex_};
+            if (!cue_advance_target_uuid.empty()) {
+                target = cue_advance_target_uuid;
+            } else if (!cue_advance_target_index.empty()) {
+                target = resolve_index_path_locked(cue_advance_target_index);
+            } else {
+                // NOT resolve_next_item_locked() — that only derives a
+                // target from endBehavior and returns empty once endBehavior
+                // stops meaning "next" (as it does for every Cue-Advance-
+                // driven item post-migration).
+                target = structural_next_locked(item.uuid);
+            }
+            if (!target.empty()) target = resolve_selection_target_locked(target);
+        }
+        if (!target.empty()) {
+            set_selected_item(target);
+            if (cue_advance_action == "end-play") {
+                // Same "don't restart what's already on air" guard the old
+                // endBehavior 'next' path used — an operator who already
+                // started it manually, or a crossfade/Start Next marker that
+                // beat us to it, shouldn't get it hard-restarted here.
+                if (item_on_air(target)) {
+                    Logger::playback("CUE ADVANCE end-play: item '{}' already "
+                                     "on air — not restarting", target);
+                } else {
+                    trigger_item(target);
+                }
+            }
+        }
+        return;
     }
 
     Logger::playback("END BEHAVIOUR: item '{}' action='{}' targetUuid='{}' targetIndexLen={}",

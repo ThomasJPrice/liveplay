@@ -3301,8 +3301,11 @@ void ControlServer::install_routes() {
             } catch (const std::exception& e) { return json_err(400, e.what()); }
         });
 
-    // Arm the selected item as "Up Next" — the control-surface equivalent of
-    // the client's "Set As Next" context action.
+    // Legacy: used to arm the selected item as a separate "Up Next" override
+    // ahead of GO. Now that GO (ProjectState::go()) plays selected_item_uuid_
+    // directly, the selection already IS the GO target — this is a no-op in
+    // effect, kept only so an existing caller doesn't get a 404. Nothing in
+    // LP calls it any more.
     CROW_ROUTE(app, "/api/transport/arm_selected")
         .methods(crow::HTTPMethod::Post, crow::HTTPMethod::Get)
         ([this](const crow::request& req){

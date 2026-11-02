@@ -62,7 +62,6 @@
           @click.stop
         >bomb</span>
         <span v-if="isPlaying" class="status-pill playing">{{ t('status.playing') }}</span>
-        <span v-else-if="isQueuedNext" class="status-pill up-next">{{ t('status.upNext') }}</span>
         <span v-if="isPreviewing" class="status-pill preview">{{ t('status.previewing') }}</span>
         <span v-if="keyLabel" class="key-label">{{ keyLabel }}</span>
       </div>
@@ -102,15 +101,6 @@
             context="Cart"
             @click.stop="isPlaying ? handleStop() : handlePlay()"
             :title="isPlaying ? t('actions.stop') : t('actions.play')"
-          />
-          <ActionButton
-            icon="fast_forward"
-            highlight-color="var(--color-warning)"
-            active-text-color="black"
-            :is-active="isManuallyQueued"
-            context="Cart"
-            @click.stop="handleSetAsNext"
-            :title="t('actions.setAsNext')"
           />
           <ActionButton
             icon="settings"
@@ -214,8 +204,7 @@ const showImportModal = ref(false);
 
 const { currentProject, selectedItem, selectedItems, selectionContext, requestDeleteFromButton, findItemByUuid, triggerWaveformUpdate, markPendingAutoProcess, resolveProjectPath } = useProject();
 const { levels: outputTargetLevels } = useOutputTarget();
-const { activeCues, activeGroups, nextItemOverrideUuid, autoNextItemUuid, setNextItem,
-        isItemPlaying, fireItem, stopItemAny } = useAudioEngine();
+const { activeCues, activeGroups, isItemPlaying, fireItem, stopItemAny } = useAudioEngine();
 const { t } = useLocalization();
 const { addCartOnlyItem, updateCartOnlyItem, removeCartOnlyItem } = useCartItems();
 const { uiMode } = useUiMode();
@@ -279,12 +268,6 @@ const isPlaying = computed(() => isItemPlaying(props.item));
 const indefiniteMark = computed(() =>
   isGroup.value && props.item && activeGroups.value.get(props.item.uuid)?.indefinite ? '+' : '');
 const isSelected = computed(() => props.item ? selectedItems.value.has(props.item.uuid) : false);
-const isManuallyQueued = computed(() => props.item ? nextItemOverrideUuid.value === props.item.uuid : false);
-const isQueuedNext = computed(() => {
-  if (!props.item) return false;
-  if (nextItemOverrideUuid.value) return nextItemOverrideUuid.value === props.item.uuid;
-  return autoNextItemUuid.value === props.item.uuid;
-});
 
 // Helper to convert hex to rgba
 const hexToRgba = (hex: string, alpha: number) => {
@@ -518,15 +501,6 @@ const handlePlay = () => {
 const handleStop = () => {
   if (!props.item) return;
   stopItemAny(props.item);
-};
-
-const handleSetAsNext = () => {
-  if (!props.item) return;
-  if (isManuallyQueued.value) {
-    setNextItem(null);
-  } else {
-    setNextItem(props.item.uuid);
-  }
 };
 
 const handleDelete = () => {

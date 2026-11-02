@@ -63,11 +63,11 @@ const computedStyle = computed(() => {
 }
 
 .action-btn--playlist {
-  width: 32px;
-  height: 32px;
+  width: 21px;
+  height: 21px;
 
   .material-symbols-rounded {
-    font-size: 18px;
+    font-size: 14px;
   }
 }
 

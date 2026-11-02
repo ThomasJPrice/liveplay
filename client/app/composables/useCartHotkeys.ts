@@ -46,9 +46,13 @@ export const eventToBinding = (e: KeyboardEvent): CartSlotKeyBinding => ({
 });
 
 export const useCartHotkeys = () => {
-  const { currentProject, selectedItem, selectedItems, saveProject, getAllItemsFlat, toggleItemSelection, findItemByUuid } = useProject();
+  const { currentProject, selectedItem, saveProject } = useProject();
   const { getCartItem } = useCartItems();
-  const { playCue, stopCue, pauseCue, resumeCue, stopAllCues, activeCues, nextItemOverrideUuid, autoNextItemUuid, setNextItem, triggerGroup, queueLoopContinuation, jumpCue, isItemPlaying, fireItem, stopItemAny } = useAudioEngine();
+  const { playCue, stopCue, pauseCue, resumeCue, stopAllCues, activeCues, triggerByUuid, queueLoopContinuation, jumpCue, isItemPlaying, fireItem, stopItemAny } = useAudioEngine();
+  // The head: select-up/select-down step it (server-authoritative, handles
+  // play-first group redirect and nested stepping); play-selected/play-next
+  // both just play it — see the Head pointer + Cue Advance plan.
+  const { selectedItemUuid, selectPrev, selectNext } = useShowControl();
 
   const keyMappings = computed(() =>
     currentProject.value?.cartSlotKeys ?? { ...DEFAULT_CART_SLOT_KEYS }
@@ -183,43 +187,20 @@ export const useCartHotkeys = () => {
       return;
     }
 
+    // PREV / NEXT: step the head through the server's flat document order —
+    // NOT a local array walk. The server resolves play-first group redirects
+    // and empty-cue skips the same way clicking a row or GO does, so this
+    // can't drift from what the rest of the app considers "next".
     if (action === 'select-up' || action === 'select-down') {
-      const project = currentProject.value;
-      if (!project) return;
-      const all = getAllItemsFlat(project.items);
-      if (all.length === 0) return;
-      if (!selectedItem.value) {
-        toggleItemSelection(all[0].uuid, false, false);
-        return;
-      }
-      const idx = all.findIndex(i => i.uuid === selectedItem.value!.uuid);
-      if (action === 'select-up' && idx > 0) {
-        toggleItemSelection(all[idx - 1].uuid, false, false);
-      } else if (action === 'select-down' && idx < all.length - 1) {
-        toggleItemSelection(all[idx + 1].uuid, false, false);
-      } else if (idx === -1 && all.length > 0) {
-        toggleItemSelection(all[0].uuid, false, false);
-      }
+      if (action === 'select-up') selectPrev(); else selectNext();
       return;
     }
 
-    if (action === 'play-selected') {
-      const uuid = Array.from(selectedItems.value).pop();
-      if (!uuid) return;
-      const item = findItemByUuid(uuid);
-      if (!item || item.type !== 'audio') return;
-      playCue(item as AudioItem);
-      return;
-    }
-
-    if (action === 'play-next') {
-      const effectiveUuid = nextItemOverrideUuid.value ?? autoNextItemUuid.value;
-      if (!effectiveUuid) return;
-      const item = findItemByUuid(effectiveUuid);
-      if (!item) return;
-      if (nextItemOverrideUuid.value) setNextItem(null);
-      if (item.type === 'audio') playCue(item as AudioItem);
-      else if (item.type === 'group') triggerGroup(item);
+    // GO, whichever key fires it: play the head. select-up/select-down moved
+    // it; a cue's own Start/End Advance or Start/End Play moves it too.
+    if (action === 'play-selected' || action === 'play-next') {
+      if (!selectedItemUuid.value) return;
+      triggerByUuid(selectedItemUuid.value);
       return;
     }
   };

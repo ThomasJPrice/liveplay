@@ -26,7 +26,8 @@ import { DEFAULT_GROUP_ITEM } from '~/types/project';
 export const SHEET_COLUMNS = [
   'UUID', 'Level', 'Type', 'Name', 'Colour',
   'Start Behaviour', 'Start Target',
-  'End Behaviour', 'End Target',
+  'End Behaviour',
+  'Cue Advance', 'Cue Advance Target',
   'Bus', 'Volume', 'Media File', 'Duration',
 ] as const;
 
@@ -37,8 +38,11 @@ const COL = Object.fromEntries(SHEET_COLUMNS.map((c, i) => [c, i])) as Record<ty
 // there is exactly one spelling to validate against and no risk of a
 // translation layer silently mapping the wrong thing on the way back in.
 const START_ACTIONS = ['nothing', 'play-next', 'play-item'] as const;
-const END_ACTIONS = ['nothing', 'next', 'goto-item', 'loop'] as const;
+// 'next'/'goto-item' retired from End Behaviour — see Cue Advance below,
+// which replaced them as how a cue's head/play-next-on-end is configured.
+const END_ACTIONS = ['nothing', 'loop'] as const;
 const GROUP_START_ACTIONS = ['play-first', 'play-all'] as const;
+const CUE_ADVANCE_ACTIONS = ['no-action', 'start-advance', 'start-play', 'end-advance', 'end-play'] as const;
 
 export interface SheetRowError {
   rowNumber: number; // 1-based, matching the sheet (header = row 1)
@@ -125,9 +129,10 @@ export function useSheetSync() {
           if (audio.startBehavior?.action === 'play-item' && audio.startBehavior.targetUuid) {
             row[COL['Start Target']] = findItemByUuid(audio.startBehavior.targetUuid)?.displayName ?? '';
           }
-          row[COL['End Behaviour']] = audio.endBehavior?.action ?? 'nothing';
-          if (audio.endBehavior?.action === 'goto-item' && audio.endBehavior.targetUuid) {
-            row[COL['End Target']] = findItemByUuid(audio.endBehavior.targetUuid)?.displayName ?? '';
+          row[COL['End Behaviour']] = audio.endBehavior?.action === 'loop' ? 'loop' : 'nothing';
+          row[COL['Cue Advance']] = audio.cueAdvance?.action ?? 'start-advance';
+          if (audio.cueAdvance?.targetUuid) {
+            row[COL['Cue Advance Target']] = findItemByUuid(audio.cueAdvance.targetUuid)?.displayName ?? '';
           }
           row[COL['Bus']] = busIdToName(buses, audio.busId);
           row[COL['Volume']] = String(audio.volume ?? 1);
@@ -184,7 +189,8 @@ export function useSheetSync() {
     startAction: string;
     startTarget: string;
     endAction: string;
-    endTarget: string;
+    cueAdvanceAction: string;
+    cueAdvanceTarget: string;
     busName: string;
     volume: string;
     mediaFile: string;
@@ -224,7 +230,8 @@ export function useSheetSync() {
         startAction: get(row, 'Start Behaviour'),
         startTarget: get(row, 'Start Target'),
         endAction: get(row, 'End Behaviour'),
-        endTarget: get(row, 'End Target'),
+        cueAdvanceAction: get(row, 'Cue Advance'),
+        cueAdvanceTarget: get(row, 'Cue Advance Target'),
         busName: get(row, 'Bus'),
         volume: get(row, 'Volume'),
         mediaFile: get(row, 'Media File'),
@@ -364,11 +371,20 @@ export function useSheetSync() {
         if (row.endAction) {
           if (!END_ACTIONS.includes(row.endAction as any)) {
             errors.push({ rowNumber: row.rowNumber, message: t('sheetSync.errorBadEndAction', { value: row.endAction }) });
+          } else if (row.endAction !== a.endBehavior?.action) {
+            record('endBehavior', a.endBehavior?.action, row.endAction);
+            a.endBehavior = { action: row.endAction as any };
+          }
+        }
+        if (row.cueAdvanceAction) {
+          if (!CUE_ADVANCE_ACTIONS.includes(row.cueAdvanceAction as any)) {
+            errors.push({ rowNumber: row.rowNumber, message: t('sheetSync.errorBadCueAdvance', { value: row.cueAdvanceAction }) });
           } else {
-            const targetUuid = row.endAction === 'goto-item' ? resolveTargetUuid(row.endTarget, row.rowNumber) : undefined;
-            if (row.endAction !== a.endBehavior?.action || targetUuid !== a.endBehavior?.targetUuid) {
-              record('endBehavior', a.endBehavior?.action, row.endAction);
-              a.endBehavior = { action: row.endAction as any, ...(targetUuid ? { targetUuid } : {}) };
+            const targetUuid = row.cueAdvanceAction !== 'no-action'
+              ? resolveTargetUuid(row.cueAdvanceTarget, row.rowNumber) : undefined;
+            if (row.cueAdvanceAction !== a.cueAdvance?.action || targetUuid !== a.cueAdvance?.targetUuid) {
+              record('cueAdvance', a.cueAdvance?.action, row.cueAdvanceAction);
+              a.cueAdvance = { action: row.cueAdvanceAction as any, ...(targetUuid ? { targetUuid } : {}) };
             }
           }
         }

@@ -97,6 +97,7 @@ const FIELD_LABELS: Record<string, string> = {
   color: 'sheetSync.fieldColour',
   startBehavior: 'sheetSync.fieldStartBehaviour',
   endBehavior: 'sheetSync.fieldEndBehaviour',
+  cueAdvance: 'sheetSync.fieldCueAdvance',
   busId: 'sheetSync.fieldBus',
   volume: 'sheetSync.fieldVolume',
 };
