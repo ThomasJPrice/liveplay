@@ -1856,7 +1856,7 @@ autoUpdater.autoInstallOnAppQuit = true;
 // Configure update feed URL to point to GitHub releases
 autoUpdater.setFeedURL({
   provider: 'github',
-  owner: 'tdoukinitsas',
+  owner: 'ThomasJPrice',
   repo: 'liveplay',
   private: false
 });
