@@ -3959,6 +3959,22 @@ ipcMain.handle('write-midi-config', async (event, config) => {
   }
 });
 
+// Run Command cue: the command string is the show author's own, typed into
+// Properties the same way they'd type it into a terminal — run through the
+// shell (exec) rather than a bare argv array so quoting/paths/pipes behave
+// exactly like they would there. Fire-and-forget: a lighting/audio-style
+// instant cue has nothing to wait on, and a slow or hanging script must
+// never block the next cue or the IPC round-trip.
+ipcMain.handle('run-command', async (event, command) => {
+  if (typeof command !== 'string' || !command.trim()) {
+    return { success: false, error: 'No command configured' };
+  }
+  exec(command, { windowsHide: true }, (error) => {
+    if (error) console.warn('[run-command] failed:', error.message);
+  });
+  return { success: true };
+});
+
 app.on('window-all-closed', () => {
   if (apiServer) {
     apiServer.close();

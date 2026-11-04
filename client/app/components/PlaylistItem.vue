@@ -67,7 +67,7 @@
           <span class="material-symbols-rounded">folder</span>
         </span>
         <span v-else-if="item.type === 'action'" class="item-icon item-icon--lighting">
-          <span class="material-symbols-rounded">bolt</span>
+          <span class="material-symbols-rounded">{{ (item as ActionItem).kind === 'run-command' ? 'terminal' : 'bolt' }}</span>
         </span>
 
         <span v-if="item.type !== 'group'" class="item-name" :class="{ 'is-peaking': isPeaking }">{{ item.displayName }}</span>
@@ -184,8 +184,14 @@
         </div>
 
         <span v-if="item.type === 'audio'" class="item-duration">{{ durationDisplay }}</span>
-        <span v-else-if="item.type === 'action'" class="item-duration item-duration--lighting" :title="t('lightingCue.goNote', { note: item.midiTrigger.goNote })">
-          {{ lightingCuelistLabel }}
+        <span
+          v-else-if="item.type === 'action'"
+          class="item-duration item-duration--lighting"
+          :title="(item as ActionItem).kind === 'run-command'
+            ? (item as ActionItem).runCommand?.command
+            : t('lightingCue.goNote', { note: (item as ActionItem).midiTrigger?.goNote })"
+        >
+          {{ actionCueLabel }}
         </span>
         <!-- A group's run time, the sum of what it will play (#63): visible
              collapsed, so a walk-in or interval playlist can be sized at a
@@ -317,9 +323,12 @@ const busBadge = computed(() => {
 
 // A lighting cue shows the dictionary's label (e.g. "Main Cuelist") instead
 // of a raw note number where possible — the note is still in the tooltip.
-const lightingCuelistLabel = computed(() => {
+// A Run Command cue shows its own command string instead.
+const actionCueLabel = computed(() => {
   if (props.item.type !== 'action') return '';
-  const note = (props.item as ActionItem).midiTrigger?.goNote;
+  const action = props.item as ActionItem;
+  if (action.kind === 'run-command') return action.runCommand?.command || t('runCommand.unconfigured');
+  const note = action.midiTrigger?.goNote;
   const dictionary = (currentProject.value?.settings as any)?.midiCuelistMap as
     Array<{ note: number; label: string }> | undefined;
   const match = dictionary?.find(d => d.note === note);

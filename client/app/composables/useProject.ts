@@ -526,10 +526,13 @@ export const useProject = () => {
     else if (Array.isArray(data)) candidates = data;
     else if (data && typeof data === 'object') candidates = [data];
     else return [];
-    // Keep only things that look like project items.
+    // Keep only things that look like project items. 'action' (Lighting /
+    // Run Command cues) is included deliberately — see project.ts's note on
+    // why it's kept out of the AudioItem|GroupItem structural types but
+    // still lives in this array at runtime.
     return candidates.filter(it =>
       it && typeof it === 'object'
-      && (it.type === 'audio' || it.type === 'group')
+      && (it.type === 'audio' || it.type === 'group' || it.type === 'action')
       && typeof it.displayName === 'string'
     );
   };

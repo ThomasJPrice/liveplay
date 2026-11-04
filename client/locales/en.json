@@ -196,6 +196,7 @@
   "playlist": {
     "title": "Playlist",
     "import": "Import Audio",
+    "addCue": "Add Cue",
     "addGroup": "Add Group",
     "noItems": "No items in playlist",
     "importAudio": "Import Audio",
@@ -207,6 +208,8 @@
     "addEmptyAudioHelp": "Adds a placeholder cue with no audio file — GO / Play Next skips straight over it. Useful as a marker for a cue fired from elsewhere, e.g. a pyro effect triggered via Companion.",
     "newEmptyAudio": "Empty Cue",
     "addLightingCue": "Add Lighting Cue",
+    "addRunCommand": "Add Run Command Cue",
+    "newRunCommand": "Run Command",
     "addLightingCueHelp": "Adds a cue that fires a MIDI note to your lighting desk (e.g. Onyx) and completes instantly, then advances like any other cue.",
     "newLightingCue": "Lighting Cue"
   },
@@ -1186,6 +1189,13 @@
     "dictionaryLabel": "Label",
     "dictionaryAdd": "Add Row",
     "dictionaryRemove": "Remove"
+  },
+  "runCommand": {
+    "tabTitle": "Run Command",
+    "commandLabel": "Command",
+    "commandPlaceholder": "e.g. spotifade down -d 20 -p",
+    "commandHelp": "Runs on the machine the LivePlay client is open on, exactly as typed — same as running it in a terminal. Nothing waits for it to finish.",
+    "unconfigured": "No command set"
   },
   "callingBars": {
     "clocksTitle": "Clocks",

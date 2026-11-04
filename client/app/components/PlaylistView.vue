@@ -6,12 +6,28 @@
         <!-- Import / add-group are edit actions — hidden in Show Mode. Titles
              carry the names once a narrow pane has dropped the labels. -->
         <div v-if="!showMode" class="playlist-actions">
-          <Btn icon="audio_file" :text="t('playlist.importAudio')" :title="t('playlist.importAudio')" :disabled="!currentProject" @click="handleImport" />
-          <Btn icon="youtube_activity" :text="t('youtube.importFromYouTube')" :title="t('youtube.importFromYouTube')" bg-style="youtube" :disabled="!currentProject" @click="showYouTubeModal = true" />
+          <Btn ref="addCueBtn" icon="add" :text="t('playlist.addCue')" :title="t('playlist.addCue')" :disabled="!currentProject" @click="openAddCueMenu" />
           <Btn icon="folder" :text="t('playlist.addGroup')" :title="t('playlist.addGroup')" :disabled="!currentProject" @click="handleAddGroup" />
-          <Btn icon="music_off" :text="t('playlist.addEmptyAudio')" :title="t('playlist.addEmptyAudioHelp')" :disabled="!currentProject" @click="handleAddEmptyAudio" />
-          <Btn icon="lightbulb" :text="t('playlist.addLightingCue')" :title="t('playlist.addLightingCueHelp')" :disabled="!currentProject" @click="handleAddLightingCue" />
         </div>
+        <BusPopover :open="addCueMenuOpen" :x="addCueMenuPos.x" :y="addCueMenuPos.y" @close="addCueMenuOpen = false">
+          <ul class="add-cue-menu" role="menu">
+            <li><button class="add-cue-menu__item" @click="addCueMenuOpen = false; handleImport()">
+              <span class="material-symbols-rounded">audio_file</span>{{ t('playlist.importAudio') }}
+            </button></li>
+            <li><button class="add-cue-menu__item" @click="addCueMenuOpen = false; showYouTubeModal = true">
+              <span class="material-symbols-rounded">youtube_activity</span>{{ t('youtube.importFromYouTube') }}
+            </button></li>
+            <li><button class="add-cue-menu__item" @click="addCueMenuOpen = false; handleAddEmptyAudio()">
+              <span class="material-symbols-rounded">music_off</span>{{ t('playlist.addEmptyAudio') }}
+            </button></li>
+            <li><button class="add-cue-menu__item" @click="addCueMenuOpen = false; handleAddLightingCue()">
+              <span class="material-symbols-rounded">lightbulb</span>{{ t('playlist.addLightingCue') }}
+            </button></li>
+            <li><button class="add-cue-menu__item" @click="addCueMenuOpen = false; handleAddRunCommand()">
+              <span class="material-symbols-rounded">terminal</span>{{ t('playlist.addRunCommand') }}
+            </button></li>
+          </ul>
+        </BusPopover>
         <PaneControls pane="playlist" :divided="!showMode" />
       </div>
     </div>
@@ -55,6 +71,7 @@ import YouTubeImportModal from './YouTubeImportModal.vue';
 import AudioImportModal from './AudioImportModal.vue';
 import Btn from './Btn.vue';
 import PaneControls from './PaneControls.vue';
+import BusPopover from './BusPopover.vue';
 import { triggerRef } from 'vue';
 import type { AudioItem, GroupItem, ActionItem } from '~/types/project';
 import { DEFAULT_AUDIO_ITEM, DEFAULT_GROUP_ITEM, PRESET_COLORS, transitionDefaultsForImport, duckingDefaultsForImport, anchorStartNextMarker } from '~/types/project';
@@ -578,6 +595,17 @@ const getAudioDuration = async (filePath: string): Promise<number> => {
   });
 };
 
+// ---- "Add Cue" menu — a single entry point for every cue type, so the
+// toolbar doesn't grow a new button for every item kind we add. ----------
+const addCueBtn = ref<InstanceType<typeof Btn> | null>(null);
+const addCueMenuOpen = ref(false);
+const addCueMenuPos = ref({ x: 0, y: 0 });
+const openAddCueMenu = () => {
+  const r = (addCueBtn.value as any)?.$el?.getBoundingClientRect();
+  if (r) addCueMenuPos.value = { x: r.left, y: r.bottom + 2 };
+  addCueMenuOpen.value = true;
+};
+
 const handleAddGroup = () => {
   if (!currentProject.value) return;
 
@@ -650,6 +678,27 @@ const handleAddLightingCue = () => {
   };
 
   addItem(lightingItem as unknown as AudioItem);
+};
+
+// A Run Command cue: runs a shell command on the Electron client's machine
+// (e.g. a Spotify fade script) and completes instantly — same shape as the
+// lighting cue above, just a different `kind`/config and no dictionary to
+// default from.
+const handleAddRunCommand = () => {
+  if (!currentProject.value) return;
+
+  const runItem: ActionItem = {
+    uuid: uuidv4(),
+    index: [currentProject.value.items.length],
+    displayName: t('playlist.newRunCommand'),
+    color: PRESET_COLORS[7],
+    type: 'action',
+    kind: 'run-command',
+    runCommand: { command: '' },
+    cueAdvance: { action: 'start-advance' },
+  };
+
+  addItem(runItem as unknown as AudioItem);
 };
 
 const handleDrop = async (e: DragEvent) => {
@@ -746,6 +795,31 @@ const handleDrop = async (e: DragEvent) => {
    and cart headers do — measured against the pane, not the window. */
 @container playlist (max-width: 720px) {
   .playlist-actions :deep(.btn > span:not(.material-symbols-rounded)) { display: none; }
+}
+
+.add-cue-menu {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 200px;
+  font-size: 13px;
+}
+.add-cue-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  color: var(--color-text-primary);
+  background: none;
+  border: none;
+  border-radius: var(--border-radius-sm);
+  cursor: pointer;
+
+  .material-symbols-rounded { font-size: 18px; color: var(--color-text-secondary); }
+
+  &:hover { background: var(--color-background); }
 }
 
 
