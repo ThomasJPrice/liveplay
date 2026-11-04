@@ -1643,6 +1643,20 @@ private:
     // Caller must hold mutex_.
     std::string resolve_selection_target_locked(const std::string& uuid);
 
+    // Shared by play_item's Start Advance/Start Play hook, run_end_behaviour's
+    // End Advance/End Play hook, and trigger_item's action-item (lighting
+    // cue) branch — the three places a cue's own Cue Advance setting fires.
+    // Resolves the target (explicit targetUuid, then targetIndex, then
+    // structural next from `source_uuid`), moves the head to it, and for
+    // `also_play` triggers it too — unless it's already on air, so a
+    // deliberate manual start or a Start Next marker that beat this to it
+    // never gets hard-restarted. Not locked itself (acquires mutex_
+    // internally); caller must NOT already hold it.
+    void apply_cue_advance(const std::string& source_uuid,
+                           const std::string& target_uuid_cfg,
+                           const std::vector<int>& target_index_cfg,
+                           bool also_play);
+
     // Re-apply the in-memory state to the AudioEngine (post-load or reset).
     void apply_to_engine_locked();
 

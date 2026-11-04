@@ -10,6 +10,7 @@
           <Btn icon="youtube_activity" :text="t('youtube.importFromYouTube')" :title="t('youtube.importFromYouTube')" bg-style="youtube" :disabled="!currentProject" @click="showYouTubeModal = true" />
           <Btn icon="folder" :text="t('playlist.addGroup')" :title="t('playlist.addGroup')" :disabled="!currentProject" @click="handleAddGroup" />
           <Btn icon="music_off" :text="t('playlist.addEmptyAudio')" :title="t('playlist.addEmptyAudioHelp')" :disabled="!currentProject" @click="handleAddEmptyAudio" />
+          <Btn icon="lightbulb" :text="t('playlist.addLightingCue')" :title="t('playlist.addLightingCueHelp')" :disabled="!currentProject" @click="handleAddLightingCue" />
         </div>
         <PaneControls pane="playlist" :divided="!showMode" />
       </div>
@@ -55,8 +56,8 @@ import AudioImportModal from './AudioImportModal.vue';
 import Btn from './Btn.vue';
 import PaneControls from './PaneControls.vue';
 import { triggerRef } from 'vue';
-import type { AudioItem, GroupItem } from '~/types/project';
-import { DEFAULT_AUDIO_ITEM, DEFAULT_GROUP_ITEM, transitionDefaultsForImport, duckingDefaultsForImport, anchorStartNextMarker } from '~/types/project';
+import type { AudioItem, GroupItem, ActionItem } from '~/types/project';
+import { DEFAULT_AUDIO_ITEM, DEFAULT_GROUP_ITEM, PRESET_COLORS, transitionDefaultsForImport, duckingDefaultsForImport, anchorStartNextMarker } from '~/types/project';
 import { applyAutoProcessing, buildWaveformFromChannels, parseWaveformFileData } from '~/utils/audio';
 import { useOutputTarget } from '~/composables/useOutputTarget';
 
@@ -619,6 +620,36 @@ const handleAddEmptyAudio = () => {
   } as AudioItem;
 
   addItem(audioItem);
+};
+
+// A lighting cue: fires a MIDI Note-On to the configured output device (see
+// useMidiController's preferredOutputDevice) and completes instantly, like
+// the empty-audio placeholder above but it actually DOES something. Defaults
+// to the first row of the project's dictionary (settings.midiCuelistMap) if
+// one exists — the operator picks the real target in Properties otherwise.
+// Cast at this one call site rather than widening AudioItem|GroupItem
+// through every tree-walker in the app (see project.ts's comment on
+// GroupItem.children for why) — addItem() only ever branches on item.type
+// at runtime, never the TS shape, so this is safe.
+const handleAddLightingCue = () => {
+  if (!currentProject.value) return;
+
+  const dictionary = (currentProject.value.settings as any)?.midiCuelistMap as
+    Array<{ note: number; label: string }> | undefined;
+  const first = dictionary?.[0];
+
+  const lightingItem: ActionItem = {
+    uuid: uuidv4(),
+    index: [currentProject.value.items.length],
+    displayName: first?.label || t('playlist.newLightingCue'),
+    color: PRESET_COLORS[7], // a distinct default so it reads apart from audio cues at a glance
+    type: 'action',
+    kind: 'midi-trigger',
+    midiTrigger: { channel: 1, goNote: first?.note ?? 0 },
+    cueAdvance: { action: 'start-advance' },
+  };
+
+  addItem(lightingItem as unknown as AudioItem);
 };
 
 const handleDrop = async (e: DragEvent) => {

@@ -419,6 +419,7 @@ enum class SettingKind {
     Integer,       // whole number, clamped to [min, max]
     StringOrNull,  // free string, or null to clear
     Ballistics,    // the meterBallisticsCustom object
+    MidiCuelistMap,// the midiCuelistMap array ({note, label} rows)
     Derived,       // computed server-side; never accepted from a client
     Relocated,     // moved to a user profile (U4); read on load, never stored
 };
@@ -482,6 +483,13 @@ static const std::unordered_map<std::string, SettingSpec>& settings_registry() {
         {"sheetsSyncSheetName",           {SettingKind::StringOrNull}},
         // ISO timestamp of the last successful Push or Pull. Display only.
         {"sheetsSyncLastSync",            {SettingKind::StringOrNull}},
+
+        // --- Lighting (MIDI) ----------------------------------------------
+        // Note -> friendly label (e.g. "Main Cuelist"), matching the macros
+        // already programmed into Onyx's own MIDI-In Event Viewer. The MIDI
+        // output PORT itself is a machine setting (useMidiController's
+        // MidiConfig), not here — this is just the show's own dictionary.
+        {"midiCuelistMap",                {SettingKind::MidiCuelistMap}},
 
         // --- Legacy, still honoured on the way in ------------------------
         // All three migrate at load and are erased from the document there —
@@ -577,6 +585,23 @@ static std::optional<json> validate_setting(const std::string& key,
         out["attackMs"]    = std::clamp(value.value("attackMs",    1.0),   0.0, 5'000.0);
         out["releaseMs"]   = std::clamp(value.value("releaseMs",   300.0), 0.0, 10'000.0);
         out["rmsWindowMs"] = std::clamp(value.value("rmsWindowMs", 300.0), 1.0, 10'000.0);
+        return std::optional<json>{std::move(out)};
+    }
+
+    case SettingKind::MidiCuelistMap: {
+        if (!value.is_array()) { why = "expected an array"; return std::nullopt; }
+        json out = json::array();
+        for (const auto& row : value) {
+            if (!row.is_object() || !row.contains("note") || !row["note"].is_number() ||
+                !row.contains("label") || !row["label"].is_string()) {
+                why = "each row needs a numeric note and a string label";
+                return std::nullopt;
+            }
+            out.push_back(json{
+                {"note",  std::clamp(static_cast<int>(row["note"].get<double>()), 0, 127)},
+                {"label", row["label"].get<std::string>()},
+            });
+        }
         return std::optional<json>{std::move(out)};
     }
     }
@@ -3087,6 +3112,43 @@ json* ProjectState::find_item_json_locked(const std::string& uuid) {
     return found;
 }
 
+void ProjectState::apply_cue_advance(const std::string& source_uuid,
+                                     const std::string& target_uuid_cfg,
+                                     const std::vector<int>& target_index_cfg,
+                                     bool also_play) {
+    std::string target;
+    {
+        std::lock_guard lock{mutex_};
+        if (!target_uuid_cfg.empty()) {
+            target = target_uuid_cfg;
+        } else if (!target_index_cfg.empty()) {
+            target = resolve_index_path_locked(target_index_cfg);
+        } else {
+            // NOT resolve_next_item_locked() — that only derives a target
+            // from endBehavior and returns empty once endBehavior stops
+            // meaning "next" (as it does for every Cue-Advance-driven item
+            // post-migration).
+            target = structural_next_locked(source_uuid);
+        }
+        // Resolve once so the head and what we're about to trigger (for
+        // also_play) always agree — play-first group redirect / empty-cue
+        // skip, same rule set_selected_item applies to every caller.
+        if (!target.empty()) target = resolve_selection_target_locked(target);
+    }
+    if (target.empty()) return;
+    set_selected_item(target);
+    if (also_play && target != source_uuid) {
+        // Don't restart what's already on air — a deliberate manual start,
+        // or a crossfade/Start Next marker that beat this to it, shouldn't
+        // get hard-restarted here.
+        if (item_on_air(target)) {
+            Logger::playback("CUE ADVANCE: item '{}' already on air — not restarting", target);
+        } else {
+            trigger_item(target);
+        }
+    }
+}
+
 std::string ProjectState::resolve_selection_target_locked(const std::string& uuid) {
     std::string current = uuid;
     for (int hops = 0; hops < 100 && !current.empty(); ++hops) {
@@ -3498,30 +3560,8 @@ bool ProjectState::play_item(const std::string& uuid,
     // precedence: explicit targetUuid, then targetIndex, then structural next
     // (flat document order, same list step_selection walks).
     if (cue_advance_action == "start-advance" || cue_advance_action == "start-play") {
-        std::string target;
-        {
-            std::lock_guard lock{mutex_};
-            if (!cue_advance_target_uuid.empty()) {
-                target = cue_advance_target_uuid;
-            } else if (!cue_advance_target_index.empty()) {
-                target = resolve_index_path_locked(cue_advance_target_index);
-            } else {
-                target = structural_next_locked(uuid);
-            }
-            // Resolve once so the head and what we're about to trigger (for
-            // start-play) always agree — play-first group redirect / empty-
-            // cue skip, same rule set_selected_item applies to every caller.
-            if (!target.empty()) target = resolve_selection_target_locked(target);
-        }
-        if (!target.empty()) {
-            set_selected_item(target);
-            // Guards the immediate self-reference case (a cue chained to
-            // itself). A longer start-play cycle across several cues isn't
-            // fully guarded — avoid configuring one.
-            if (cue_advance_action == "start-play" && target != uuid) {
-                trigger_item(target);
-            }
-        }
+        apply_cue_advance(uuid, cue_advance_target_uuid, cue_advance_target_index,
+                          cue_advance_action == "start-play");
     }
 
     return true;
@@ -4099,6 +4139,11 @@ bool ProjectState::trigger_item(const std::string& uuid,
     std::string type;
     std::string start_action;
     std::vector<std::string> child_uuids;
+    int         midi_channel = 1;
+    int         midi_note    = -1;
+    std::string cue_advance_action;
+    std::string cue_advance_target_uuid;
+    std::vector<int> cue_advance_target_index;
     {
         std::lock_guard lock{mutex_};
         json* found = nullptr;
@@ -4135,11 +4180,52 @@ bool ProjectState::trigger_item(const std::string& uuid,
                     }
                 }
             }
+        } else if (type == "action") {
+            if (found->contains("midiTrigger") && (*found)["midiTrigger"].is_object()) {
+                const auto& mt = (*found)["midiTrigger"];
+                midi_channel = std::clamp(mt.value("channel", 1), 1, 16);
+                midi_note    = std::clamp(mt.value("goNote", -1), 0, 127);
+            }
+            if (found->contains("cueAdvance") && (*found)["cueAdvance"].is_object()) {
+                const auto& ca = (*found)["cueAdvance"];
+                cue_advance_action      = ca.value("action",     std::string{});
+                cue_advance_target_uuid = ca.value("targetUuid", std::string{});
+                if (ca.contains("targetIndex") && ca["targetIndex"].is_array()) {
+                    for (const auto& v : ca["targetIndex"]) {
+                        if (v.is_number_integer()) cue_advance_target_index.push_back(v.get<int>());
+                    }
+                }
+            }
         }
     }
 
     if (type == "audio") {
         return play_item(uuid, fade_in_override_sec, exclude_from_ducking);
+    }
+    if (type == "action") {
+        // Lighting cue: fire-and-forget MIDI, then behave like an instant
+        // cue for sequencing purposes. No engine cue is ever created for a
+        // non-"audio" item (mirror_items_to_engine_locked), so there is no
+        // decode, no duration, and it never shows up in activeCues — Start
+        // and End necessarily coincide at this one moment, so whichever of
+        // the 5 Cue Advance actions is configured (start-* or end-*) is
+        // applied here, uniformly, the instant the note is sent.
+        if (midi_note < 0) {
+            Logger::warn("trigger_item('{}'): lighting cue has no MIDI note configured", uuid);
+            return false;
+        }
+        execute_custom_action(json{
+            {"type",     "midi-note"},
+            {"channel",  midi_channel},
+            {"note",     midi_note},
+            {"velocity", 127},
+        });
+        if (cue_advance_action == "start-advance" || cue_advance_action == "end-advance") {
+            apply_cue_advance(uuid, cue_advance_target_uuid, cue_advance_target_index, false);
+        } else if (cue_advance_action == "start-play" || cue_advance_action == "end-play") {
+            apply_cue_advance(uuid, cue_advance_target_uuid, cue_advance_target_index, true);
+        }
+        return true;
     }
     if (type == "group") {
         if (child_uuids.empty()) return false;
@@ -8057,11 +8143,13 @@ void ProjectState::execute_custom_action(const json& action) {
         }
         engine_.stop_all(std::chrono::milliseconds{0}, /*force_fade=*/false, spare);
     }
-    else if (type == "http-request") {
-        // Hand off to whoever subscribed via set_external_action_handler.
-        // The control server wires this to a doc_patch broadcast so a
-        // connected client executes the fetch — keeping server free of an
-        // HTTP client dependency.
+    else if (type == "http-request" || type == "midi-note") {
+        // Same hand-off for both: the server has no HTTP client NOR a MIDI
+        // output of its own (Web MIDI only exists in a browser/Electron
+        // renderer), so set_external_action_handler's subscriber — wired by
+        // the control server to a doc_patch broadcast — does the real work
+        // on a connected client. See trigger_item's "action" (lighting cue)
+        // branch for where a midi-note action gets built.
         std::function<void(const json&)> handler;
         {
             std::lock_guard lock{mutex_};
@@ -8070,7 +8158,7 @@ void ProjectState::execute_custom_action(const json& action) {
         if (handler) {
             try { handler(action); } catch (...) {}
         } else {
-            Logger::warn("custom action http-request: no handler installed");
+            Logger::warn("custom action {}: no handler installed", type);
         }
     }
     else {
@@ -8401,37 +8489,8 @@ void ProjectState::run_end_behaviour(const SequencedItem& item) {
     // "End Play" (the latter is what LP's old endBehavior 'next' always
     // did; this is the direct replacement, now also moving a real head).
     if (cue_advance_action == "end-advance" || cue_advance_action == "end-play") {
-        std::string target;
-        {
-            std::lock_guard lock{mutex_};
-            if (!cue_advance_target_uuid.empty()) {
-                target = cue_advance_target_uuid;
-            } else if (!cue_advance_target_index.empty()) {
-                target = resolve_index_path_locked(cue_advance_target_index);
-            } else {
-                // NOT resolve_next_item_locked() — that only derives a
-                // target from endBehavior and returns empty once endBehavior
-                // stops meaning "next" (as it does for every Cue-Advance-
-                // driven item post-migration).
-                target = structural_next_locked(item.uuid);
-            }
-            if (!target.empty()) target = resolve_selection_target_locked(target);
-        }
-        if (!target.empty()) {
-            set_selected_item(target);
-            if (cue_advance_action == "end-play") {
-                // Same "don't restart what's already on air" guard the old
-                // endBehavior 'next' path used — an operator who already
-                // started it manually, or a crossfade/Start Next marker that
-                // beat us to it, shouldn't get it hard-restarted here.
-                if (item_on_air(target)) {
-                    Logger::playback("CUE ADVANCE end-play: item '{}' already "
-                                     "on air — not restarting", target);
-                } else {
-                    trigger_item(target);
-                }
-            }
-        }
+        apply_cue_advance(item.uuid, cue_advance_target_uuid, cue_advance_target_index,
+                          cue_advance_action == "end-play");
         return;
     }
 

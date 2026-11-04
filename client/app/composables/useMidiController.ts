@@ -20,6 +20,7 @@ export type MidiActionId =
 export interface MidiConfig {
   bindings: Record<string, MidiBinding>; // actionId → binding
   preferredDevice?: string;              // preferred MIDI input device name
+  preferredOutputDevice?: string;        // preferred MIDI output device name — lighting cues
   masterVolumeMultiplier?: number;       // dB applied per master-volume MIDI step (default 1)
 }
 
@@ -101,6 +102,7 @@ const parseMidiMessage = (data: Uint8Array): { channel: number; type: 'note' | '
 const config = ref<MidiConfig>({ bindings: {} });
 const midiAccess = ref<MIDIAccess | null>(null);
 const connectedDevices = ref<string[]>([]);
+const connectedOutputDevices = ref<string[]>([]);
 const learning = ref<MidiActionId | null>(null);
 const lastMidiMessage = ref<MidiBinding | null>(null);
 let onLearnCapture: ((binding: MidiBinding) => void) | null = null;
@@ -109,6 +111,7 @@ let mounted = false;
 let lastMasterVolumeRaw: number | null = null;
 
 const preferredDevice = computed(() => config.value.preferredDevice ?? null);
+const preferredOutputDevice = computed(() => config.value.preferredOutputDevice ?? null);
 
 export const useMidiController = () => {
   const { getCartItem } = useCartItems();
@@ -344,6 +347,7 @@ export const useMidiController = () => {
   const updateDeviceList = () => {
     if (!midiAccess.value) {
       connectedDevices.value = [];
+      connectedOutputDevices.value = [];
       return;
     }
     const names: string[] = [];
@@ -351,6 +355,12 @@ export const useMidiController = () => {
       if (input.name) names.push(input.name);
     });
     connectedDevices.value = names;
+
+    const outNames: string[] = [];
+    midiAccess.value.outputs.forEach((output) => {
+      if (output.name) outNames.push(output.name);
+    });
+    connectedOutputDevices.value = outNames;
   };
 
   /**
@@ -410,6 +420,57 @@ export const useMidiController = () => {
       delete config.value.preferredDevice;
     }
     saveConfig();
+  };
+
+  /**
+   * Set (or clear) the preferred MIDI OUTPUT device — where lighting cues
+   * (ActionItem, kind 'midi-trigger') send their Note-On. A machine setting,
+   * same as the input device: which physical/virtual (e.g. loopMIDI) port
+   * this rig is wired to, not something that travels with the show.
+   */
+  const setPreferredOutputDevice = (deviceName: string | null) => {
+    if (deviceName) {
+      config.value.preferredOutputDevice = deviceName;
+    } else {
+      delete config.value.preferredOutputDevice;
+    }
+    saveConfig();
+  };
+
+  /**
+   * Send a plain 3-byte MIDI Note-On to the configured output device — the
+   * actual send behind a lighting cue's GO. No separate Web MIDI permission
+   * is needed: requestMIDIAccess() above already grants both `.inputs` and
+   * `.outputs` on the one MIDIAccess object (confirmed via the Web MIDI
+   * spec; there's no distinct "output" permission). Best-effort: if no
+   * output device is configured, or the configured one isn't connected,
+   * this logs and does nothing rather than throwing — a disconnected
+   * lighting rig shouldn't be able to break GO for the rest of the cue.
+   */
+  const sendMidiNote = (channel: number, note: number, velocity = 127) => {
+    if (!midiAccess.value) {
+      console.warn('[MIDI] sendMidiNote: no MIDI access');
+      return;
+    }
+    const wanted = config.value.preferredOutputDevice;
+    if (!wanted) {
+      console.warn('[MIDI] sendMidiNote: no output device configured (Settings > Controls)');
+      return;
+    }
+    let target: MIDIOutput | null = null;
+    midiAccess.value.outputs.forEach((output) => {
+      if (!target && output.name === wanted) target = output;
+    });
+    if (!target) {
+      console.warn(`[MIDI] sendMidiNote: output device "${wanted}" not connected`);
+      return;
+    }
+    // Status byte: 0x90 (Note On) | channel nibble. channel here is the
+    // user-facing 1-16; the wire format's low nibble is 0-based.
+    const statusByte = 0x90 | (Math.max(1, Math.min(16, channel)) - 1);
+    const noteByte = Math.max(0, Math.min(127, note));
+    const velByte = Math.max(0, Math.min(127, velocity));
+    (target as MIDIOutput).send([statusByte, noteByte, velByte]);
   };
 
   /**
@@ -504,7 +565,9 @@ export const useMidiController = () => {
   return {
     config,
     connectedDevices,
+    connectedOutputDevices,
     preferredDevice,
+    preferredOutputDevice,
     learning,
     lastMidiMessage,
     mount,
@@ -515,6 +578,8 @@ export const useMidiController = () => {
     clearBinding,
     clearAllBindings,
     setPreferredDevice,
+    setPreferredOutputDevice,
+    sendMidiNote,
     setMasterVolumeMultiplier,
   };
 };

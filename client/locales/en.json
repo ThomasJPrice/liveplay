@@ -205,7 +205,10 @@
     "newGroup": "New Group",
     "addEmptyAudio": "Add Empty Audio",
     "addEmptyAudioHelp": "Adds a placeholder cue with no audio file — GO / Play Next skips straight over it. Useful as a marker for a cue fired from elsewhere, e.g. a pyro effect triggered via Companion.",
-    "newEmptyAudio": "Empty Cue"
+    "newEmptyAudio": "Empty Cue",
+    "addLightingCue": "Add Lighting Cue",
+    "addLightingCueHelp": "Adds a cue that fires a MIDI note to your lighting desk (e.g. Onyx) and completes instantly, then advances like any other cue.",
+    "newLightingCue": "Lighting Cue"
   },
   "cart": {
     "title": "Cart Player",
@@ -471,6 +474,7 @@
     "pullFailed": "Pull failed.",
     "noSpreadsheet": "No spreadsheet is configured for this show yet.",
     "untitledGroup": "Untitled",
+    "untitledLighting": "Untitled Lighting Cue",
     "diffTitle": "Review changes from Google Sheets",
     "diffEmpty": "No changes — the sheet already matches the show.",
     "diffErrors": "{count} row(s) couldn't be applied",
@@ -504,7 +508,8 @@
     "errorBadEndActionGroup": "\"{value}\" isn't a valid End Behaviour for a Scene/Block (use nothing or loop).",
     "errorBadCueAdvance": "\"{value}\" isn't a valid Cue Advance (use no-action, start-advance, start-play, end-advance or end-play).",
     "errorUnknownBus": "No bus named \"{name}\" was found.",
-    "errorBadVolume": "\"{value}\" isn't a valid Volume (must be 0–2)."
+    "errorBadVolume": "\"{value}\" isn't a valid Volume (must be 0–2).",
+    "errorUnknownCuelist": "No lighting cuelist named \"{name}\" was found in the project's dictionary."
   },
   "serverSettings": {
     "title": "LivePlay Server",
@@ -1166,6 +1171,21 @@
     "barHint": "{pane}: click or drag to open",
     "emptyTitle": "All panes are collapsed",
     "emptyHint": "Click or drag a bar at the edge, or use the buttons at the top, to open a pane."
+  },
+  "lightingCue": {
+    "goNote": "GO note {note}",
+    "unmappedNote": "Note {note} (unmapped)",
+    "channel": "Channel",
+    "goNoteLabel": "Cuelist",
+    "outputDevice": "MIDI Output Device",
+    "outputDeviceHelp": "Which MIDI port lighting cues send their GO note to — point this at a loopback port (e.g. loopMIDI) your lighting desk listens on. A machine setting, not part of the show.",
+    "noOutputDevice": "No MIDI output devices found",
+    "dictionaryTitle": "Lighting (MIDI)",
+    "dictionaryHelp": "Note numbers matching the macros you've already programmed into your lighting desk's MIDI-In Event Viewer — each row here just gives LivePlay a friendly name for one.",
+    "dictionaryNote": "Note",
+    "dictionaryLabel": "Label",
+    "dictionaryAdd": "Add Row",
+    "dictionaryRemove": "Remove"
   },
   "callingBars": {
     "clocksTitle": "Clocks",

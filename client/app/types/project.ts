@@ -95,6 +95,13 @@ export interface WaveformData {
 // Group item properties
 export interface GroupItem extends BaseItem {
   type: 'group';
+  // Not widened to include ActionItem: that rippled into ~50 new type
+  // errors across every tree-walker that assumes audio/group (useProject.ts
+  // alone accounted for 28). ActionItem entries still live in this array at
+  // runtime (the server/client only ever check item.type, never the TS
+  // shape) — new code that specifically handles 'action' casts locally
+  // (`item as ActionItem`) the same way a handful of edge cases already do
+  // elsewhere in this codebase, rather than widening the structural type.
   children: (AudioItem | GroupItem)[];
   startBehavior: GroupStartBehavior;
   endBehavior: EndBehavior;
@@ -132,6 +139,30 @@ export interface CueAdvance {
   action: 'no-action' | 'start-advance' | 'start-play' | 'end-advance' | 'end-play';
   targetUuid?: string;   // explicit target; absent = structural "next" (MP's "Next Cue")
   targetIndex?: number[];
+}
+
+// Fires a plain 3-byte MIDI Note-On to a configured output port when this
+// cue plays, then completes instantly (no engine cue, no duration) —
+// Obsidian Onyx's MIDI-In Event Viewer maps a specific note to "GO on
+// Cuelist N" via a macro the operator programs on Onyx's own side; this is
+// just the sender. RELEASE (a second note) is deliberately not modelled yet.
+export interface MidiTriggerConfig {
+  channel: number; // 1-16
+  goNote: number;  // 0-127, resolved display-name-wise against the project's
+                    // settings.midiCuelistMap
+}
+
+// Action item: a non-audio, instant playlist entry. One `kind` exists today
+// (`midi-trigger`); the union leaves room for e.g. `osc-trigger` later
+// without reshaping anything that already exists.
+export interface ActionItem extends BaseItem {
+  type: 'action';
+  kind: 'midi-trigger';
+  midiTrigger: MidiTriggerConfig;
+  // Same field AudioItem uses — moves the head and optionally plays the
+  // target immediately after firing (Start and End coincide for an instant
+  // cue; see the server's trigger_item action-item branch).
+  cueAdvance?: CueAdvance;
 }
 
 // Custom action at specific time
@@ -492,6 +523,14 @@ export interface ProjectSettings {
   sheetsSyncSheetName?: string;
   /** ISO timestamp of the last successful Push or Pull, for display only. */
   sheetsSyncLastSync?: string;
+
+  // Lighting cue dictionary: MIDI note -> a friendly label (e.g. "Main
+  // Cuelist"), matching the macros already programmed into Onyx's own
+  // MIDI-In Event Viewer. Show-specific, so this travels with the project
+  // like the Sheets settings above — unlike the MIDI OUTPUT device itself
+  // (which port, e.g. a loopMIDI port name), which is a machine setting in
+  // useMidiController's MidiConfig, not here.
+  midiCuelistMap?: Array<{ note: number; label: string }>;
 }
 
 
@@ -516,6 +555,7 @@ export interface Project {
   // Mirrored from the server's header and handed straight back on save, so the
   // client never claims a version it wasn't given.
   busSchema?: number;
+  // See the comment on GroupItem.children — not widened for the same reason.
   items: (AudioItem | GroupItem)[];
   cartItems: CartItem[];
   cartSlotKeys?: Record<number, CartSlotKeyBinding>;
