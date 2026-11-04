@@ -1177,6 +1177,10 @@
     "nowPlaying": "Now Playing",
     "upNext": "Up Next",
     "noneQueued": "Nothing queued",
-    "noNote": "No note"
+    "noNote": "No note",
+    "previousCue": "Previous",
+    "selectedCue": "Selected",
+    "nextCue": "Next",
+    "noneSelected": "Nothing selected"
   }
 }
