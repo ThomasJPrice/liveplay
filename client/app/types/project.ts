@@ -16,6 +16,13 @@ export interface BaseItem {
    * the save and sync paths.
    */
   busId?: string;
+  /**
+   * Free-text calling note (reminders, warnings, "to record" etc.) — the
+   * LivePlay equivalent of MultiPlay's per-cue Notes panel. Edited in the
+   * Properties panel's Notes tab; surfaced read-only in the Notes bar for
+   * whatever's currently playing and queued up next while running a show.
+   */
+  notes?: string;
 }
 
 // Audio-specific properties

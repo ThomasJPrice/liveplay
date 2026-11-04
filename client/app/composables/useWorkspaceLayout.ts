@@ -42,15 +42,16 @@
 // owns the clamping, because only it knows the row's width.
 // =====================================================================
 
-export type PaneId = 'playlist' | 'cart' | 'mixer';
+export type PaneId = 'playlist' | 'notes' | 'cart' | 'mixer';
 export type PaneSet = Record<PaneId, boolean>;
 
 /** Left to right, always. The first docked pane is the one that stretches. */
-export const PANE_ORDER: readonly PaneId[] = ['playlist', 'cart', 'mixer'];
+export const PANE_ORDER: readonly PaneId[] = ['playlist', 'notes', 'cart', 'mixer'];
 
 /** The splitters' defaults. One owner per constant — MainWorkspace reads these. */
 export const CART_DEFAULT_PX       = 500;
 export const MIXER_DEFAULT_PX      = 420;
+export const NOTES_DEFAULT_PX      = 320;
 export const PROPERTIES_DEFAULT_PX = 300;
 
 const STORAGE_KEY = 'liveplay-workspace-layout';
@@ -60,13 +61,16 @@ const STORAGE_KEY = 'liveplay-workspace-layout';
 // short enough that quitting straight after one keeps it.
 const WRITE_DEBOUNCE_MS = 400;
 
-const DEFAULT_PANES: PaneSet = { playlist: true, cart: true, mixer: false };
+// Notes defaults open: it's a show-calling aid meant to be on screen by
+// default, same reasoning as the playlist itself.
+const DEFAULT_PANES: PaneSet = { playlist: true, notes: true, cart: true, mixer: false };
 
 interface StoredLayout {
   panes?: Partial<PaneSet>;
   restore?: Partial<PaneSet> | null;
   cartWidth?: number;
   mixerWidth?: number;
+  notesWidth?: number;
   propertiesHeight?: number;
   // Pre-2.5.0-release shapes, read once so an upgrade keeps what was showing.
   cartClosed?: boolean;
@@ -99,6 +103,7 @@ export const useWorkspaceLayout = () => {
   const restoreSet       = useState<PaneSet | null>('liveplay:paneRestore', () => null);
   const cartWidth        = useState<number>('liveplay:cartWidth', () => CART_DEFAULT_PX);
   const mixerWidth       = useState<number>('liveplay:mixerWidth', () => MIXER_DEFAULT_PX);
+  const notesWidth       = useState<number>('liveplay:notesWidth', () => NOTES_DEFAULT_PX);
   const propertiesHeight = useState<number>('liveplay:propertiesHeight', () => PROPERTIES_DEFAULT_PX);
   // Set by the main window when Electron reports the window opened/closed.
   const cartDetached     = useState<boolean>('liveplay:cartDetached', () => false);
@@ -116,6 +121,7 @@ export const useWorkspaceLayout = () => {
         if (s && typeof s === 'object') {
           if (isSanePx(s.cartWidth))        cartWidth.value        = s.cartWidth;
           if (isSanePx(s.mixerWidth))       mixerWidth.value       = s.mixerWidth;
+          if (isSanePx(s.notesWidth))       notesWidth.value       = s.notesWidth;
           if (isSanePx(s.propertiesHeight)) propertiesHeight.value = s.propertiesHeight;
           const stored = readPaneSet(s.panes);
           if (stored) {
@@ -124,8 +130,11 @@ export const useWorkspaceLayout = () => {
           } else {
             // The 2.5.0 betas' flags. Fullscreen/expanded states are not carried
             // over — landing docked is the predictable answer after an upgrade.
+            // Notes didn't exist yet at this shape, so it lands on its own
+            // default (open) rather than any stored flag.
             panes.value = {
               playlist: true,
+              notes: true,
               cart:  s.cartClosed !== true,
               mixer: s.mixerOpen === true && s.mixerCollapsed !== true,
             };
@@ -274,6 +283,7 @@ export const useWorkspaceLayout = () => {
         restore:          restoreSet.value,
         cartWidth:        cartWidth.value,
         mixerWidth:       mixerWidth.value,
+        notesWidth:       notesWidth.value,
         propertiesHeight: propertiesHeight.value,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(out));
@@ -296,7 +306,7 @@ export const useWorkspaceLayout = () => {
 
   return {
     panes, restoreSet, dockedPanes, flexPane,
-    cartWidth, mixerWidth, propertiesHeight,
+    cartWidth, mixerWidth, notesWidth, propertiesHeight,
     cartDetached, mixerDetached,
     isDetached, isExpanded, canExpand, canDetach,
     showPane, hidePane, setPaneOpen, togglePane, expandPane, restorePanes, detachPane, attachPane,

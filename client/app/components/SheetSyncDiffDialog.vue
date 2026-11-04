@@ -100,6 +100,7 @@ const FIELD_LABELS: Record<string, string> = {
   cueAdvance: 'sheetSync.fieldCueAdvance',
   busId: 'sheetSync.fieldBus',
   volume: 'sheetSync.fieldVolume',
+  notes: 'sheetSync.fieldNotes',
 };
 function fieldLabel(field: string): string {
   const key = FIELD_LABELS[field];

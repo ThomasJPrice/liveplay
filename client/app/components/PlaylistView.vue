@@ -9,6 +9,7 @@
           <Btn icon="audio_file" :text="t('playlist.importAudio')" :title="t('playlist.importAudio')" :disabled="!currentProject" @click="handleImport" />
           <Btn icon="youtube_activity" :text="t('youtube.importFromYouTube')" :title="t('youtube.importFromYouTube')" bg-style="youtube" :disabled="!currentProject" @click="showYouTubeModal = true" />
           <Btn icon="folder" :text="t('playlist.addGroup')" :title="t('playlist.addGroup')" :disabled="!currentProject" @click="handleAddGroup" />
+          <Btn icon="music_off" :text="t('playlist.addEmptyAudio')" :title="t('playlist.addEmptyAudioHelp')" :disabled="!currentProject" @click="handleAddEmptyAudio" />
         </div>
         <PaneControls pane="playlist" :divided="!showMode" />
       </div>
@@ -589,6 +590,35 @@ const handleAddGroup = () => {
   } as GroupItem;
 
   addItem(groupItem);
+};
+
+// A placeholder cue with no media — a marker for a cue fired from elsewhere
+// (e.g. a pyro effect triggered via Bitfocus Companion) that still needs a
+// slot in the running order. The server never loads a decoder for it
+// (mirror_items_to_engine_locked skips any item whose resolved media path is
+// empty), and useAudioEngine's resolvePastEmptyCues makes GO / Play Next
+// step straight over it to the next real cue instead of doing nothing.
+// Media can be attached later via Properties > Media > Replace File, same as
+// any other cue.
+const handleAddEmptyAudio = () => {
+  if (!currentProject.value) return;
+
+  const audioItem: AudioItem = {
+    ...DEFAULT_AUDIO_ITEM,
+    ...duckingDefaultsForImport((currentProject.value as any)?.settings?.defaultDuckingMode),
+    uuid: uuidv4(),
+    index: [currentProject.value.items.length],
+    displayName: t('playlist.newEmptyAudio'),
+    type: 'audio',
+    mediaFileName: '',
+    mediaPath: '',
+    waveformPath: '',
+    waveform: undefined,
+    outPoint: 0,
+    duration: 0,
+  } as AudioItem;
+
+  addItem(audioItem);
 };
 
 const handleDrop = async (e: DragEvent) => {

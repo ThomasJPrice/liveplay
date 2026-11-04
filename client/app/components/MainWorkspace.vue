@@ -111,6 +111,7 @@
           :style="item.pane === flexPane ? undefined : { width: `${paneWidth(item.pane)}px` }"
         >
           <PlaylistView v-if="item.pane === 'playlist'" />
+          <NotesPanel v-else-if="item.pane === 'notes'" />
           <CartPlayer v-else-if="item.pane === 'cart'" />
           <MixerPanel v-else :mode="mixerMode" @mode="onMixerMode" />
         </div>
@@ -141,6 +142,14 @@
       ><span class="resize-grip-h" aria-hidden="true"></span></div>
       <PropertiesPanel />
     </template>
+
+    <!-- Show-calling clock strip: always on screen (edit mode and Show Mode
+         alike), collapsible independently of the playlist/notes/cart/mixer
+         pane row above — see useShowCallingBars for why it isn't part of
+         that model. Notes lives in the pane row instead (NotesPanel, pane
+         id 'notes') since it benefits from the same width/collapse controls
+         as the playlist. -->
+    <ShowClockBar />
 
     <ProgressModal
       :visible="progressModal.visible"
@@ -178,7 +187,7 @@
 import LocationChoiceModal from './LocationChoiceModal.vue';
 import ServerFilePickerModal from './ServerFilePickerModal.vue';
 import {
-  CART_DEFAULT_PX, MIXER_DEFAULT_PX, PROPERTIES_DEFAULT_PX, PANE_ORDER,
+  CART_DEFAULT_PX, MIXER_DEFAULT_PX, NOTES_DEFAULT_PX, PROPERTIES_DEFAULT_PX, PANE_ORDER,
   type PaneId, type PaneSet,
 } from '~/composables/useWorkspaceLayout';
 
@@ -216,7 +225,7 @@ const progressModal = ref({
 // workspace bar — is changing the same state, and persistence is one watcher.
 const {
   panes, restoreSet, dockedPanes, flexPane,
-  cartWidth, mixerWidth, propertiesHeight,
+  cartWidth, mixerWidth, notesWidth, propertiesHeight,
   cartDetached, mixerDetached,
   showPane, setPaneOpen, expandPane, restorePanes, isDetached,
   persistLayout, flushLayout,
@@ -230,9 +239,9 @@ const workspaceEl = ref<HTMLElement | null>(null);
 // Splitter geometry.
 // The mixer's floor is its header: Add Bus, Hardware Outputs and the window
 // controls have to fit as icons beside the two pinned strips.
-const PANE_MIN_PX: Record<PaneId, number> = { playlist: 240, cart: 300, mixer: 280 };
+const PANE_MIN_PX: Record<PaneId, number> = { playlist: 240, notes: 260, cart: 300, mixer: 280 };
 const PANE_DEFAULT_PX: Record<PaneId, number> = {
-  playlist: 0, cart: CART_DEFAULT_PX, mixer: MIXER_DEFAULT_PX,
+  playlist: 0, notes: NOTES_DEFAULT_PX, cart: CART_DEFAULT_PX, mixer: MIXER_DEFAULT_PX,
 };
 const HANDLE_PX = 10;             // an open pane's splitter — keep in step with .resize-handle
 const BAR_PX = 28;                // a collapsed pane's bar — keep in step with .resize-handle--bar
@@ -241,21 +250,23 @@ const BAR_PX = 28;                // a collapsed pane's bar — keep in step wit
 // what stops a pointer resting on the line from flipping it on every move.
 const REOPEN_MARGIN_PX = 40;
 const PANE_ICON: Record<PaneId, string> = {
-  playlist: 'queue_music', cart: 'grid_view', mixer: 'instant_mix',
+  playlist: 'queue_music', notes: 'sticky_note_2', cart: 'grid_view', mixer: 'instant_mix',
 };
 const PANE_TITLE_KEY: Record<PaneId, string> = {
-  playlist: 'playlist.title', cart: 'cart.title', mixer: 'mixer.title',
+  playlist: 'playlist.title', notes: 'callingBars.notesTitle', cart: 'cart.title', mixer: 'mixer.title',
 };
 const paneName = (p: PaneId) => t(PANE_TITLE_KEY[p]);
 
-// Only the cart and the mixer ever have a fixed width of their own; the
+// Only notes, cart and the mixer ever have a fixed width of their own; the
 // playlist is only ever sized as the pane that stretches.
 function paneWidth(p: PaneId): number {
-  return p === 'cart' ? cartWidth.value : p === 'mixer' ? mixerWidth.value : 0;
+  return p === 'cart' ? cartWidth.value : p === 'mixer' ? mixerWidth.value
+       : p === 'notes' ? notesWidth.value : 0;
 }
 function setPaneWidth(p: PaneId, w: number) {
   if (p === 'cart') cartWidth.value = w;
   else if (p === 'mixer') mixerWidth.value = w;
+  else if (p === 'notes') notesWidth.value = w;
 }
 
 type RowItem =
@@ -470,7 +481,7 @@ const startEdgeDrag = (e: PointerEvent, p: PaneId) => {
   // Widths as the drag found them. A pane collapsed by this drag keeps the
   // width it had, not the sliver it was dragged down to, so it reopens sanely.
   const startWidths: Record<PaneId, number> = {
-    playlist: 0, cart: cartWidth.value, mixer: mixerWidth.value,
+    playlist: 0, cart: cartWidth.value, mixer: mixerWidth.value, notes: notesWidth.value,
   };
 
   const collapse = (q: PaneId) => {
@@ -916,7 +927,7 @@ const { mount: mountMidi, unmount: unmountMidi } = useMidiController();
 // debounced inside the composable, which is what stops a pointermove stream
 // becoming a localStorage write per frame.
 watch(
-  [cartWidth, mixerWidth, propertiesHeight, panes, restoreSet],
+  [cartWidth, mixerWidth, notesWidth, propertiesHeight, panes, restoreSet],
   () => persistLayout(),
 );
 
