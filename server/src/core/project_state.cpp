@@ -4139,8 +4139,10 @@ bool ProjectState::trigger_item(const std::string& uuid,
     std::string type;
     std::string start_action;
     std::vector<std::string> child_uuids;
+    std::string action_kind;
     int         midi_channel = 1;
     int         midi_note    = -1;
+    std::string run_command;
     std::string cue_advance_action;
     std::string cue_advance_target_uuid;
     std::vector<int> cue_advance_target_index;
@@ -4181,10 +4183,14 @@ bool ProjectState::trigger_item(const std::string& uuid,
                 }
             }
         } else if (type == "action") {
+            action_kind = found->value("kind", std::string{});
             if (found->contains("midiTrigger") && (*found)["midiTrigger"].is_object()) {
                 const auto& mt = (*found)["midiTrigger"];
                 midi_channel = std::clamp(mt.value("channel", 1), 1, 16);
                 midi_note    = std::clamp(mt.value("goNote", -1), 0, 127);
+            }
+            if (found->contains("runCommand") && (*found)["runCommand"].is_object()) {
+                run_command = (*found)["runCommand"].value("command", std::string{});
             }
             if (found->contains("cueAdvance") && (*found)["cueAdvance"].is_object()) {
                 const auto& ca = (*found)["cueAdvance"];
@@ -4203,23 +4209,35 @@ bool ProjectState::trigger_item(const std::string& uuid,
         return play_item(uuid, fade_in_override_sec, exclude_from_ducking);
     }
     if (type == "action") {
-        // Lighting cue: fire-and-forget MIDI, then behave like an instant
-        // cue for sequencing purposes. No engine cue is ever created for a
-        // non-"audio" item (mirror_items_to_engine_locked), so there is no
-        // decode, no duration, and it never shows up in activeCues — Start
-        // and End necessarily coincide at this one moment, so whichever of
-        // the 5 Cue Advance actions is configured (start-* or end-*) is
-        // applied here, uniformly, the instant the note is sent.
-        if (midi_note < 0) {
-            Logger::warn("trigger_item('{}'): lighting cue has no MIDI note configured", uuid);
-            return false;
+        // Lighting cue / Run Command cue: fire-and-forget (MIDI note or a
+        // shell command), then behave like an instant cue for sequencing
+        // purposes. No engine cue is ever created for a non-"audio" item
+        // (mirror_items_to_engine_locked), so there is no decode, no
+        // duration, and it never shows up in activeCues — Start and End
+        // necessarily coincide at this one moment, so whichever of the 5
+        // Cue Advance actions is configured (start-* or end-*) is applied
+        // here, uniformly, the instant the action fires.
+        if (action_kind == "run-command") {
+            if (run_command.empty()) {
+                Logger::warn("trigger_item('{}'): run-command cue has no command configured", uuid);
+                return false;
+            }
+            execute_custom_action(json{
+                {"type",    "run-command"},
+                {"command", run_command},
+            });
+        } else {
+            if (midi_note < 0) {
+                Logger::warn("trigger_item('{}'): lighting cue has no MIDI note configured", uuid);
+                return false;
+            }
+            execute_custom_action(json{
+                {"type",     "midi-note"},
+                {"channel",  midi_channel},
+                {"note",     midi_note},
+                {"velocity", 127},
+            });
         }
-        execute_custom_action(json{
-            {"type",     "midi-note"},
-            {"channel",  midi_channel},
-            {"note",     midi_note},
-            {"velocity", 127},
-        });
         if (cue_advance_action == "start-advance" || cue_advance_action == "end-advance") {
             apply_cue_advance(uuid, cue_advance_target_uuid, cue_advance_target_index, false);
         } else if (cue_advance_action == "start-play" || cue_advance_action == "end-play") {
@@ -8143,13 +8161,13 @@ void ProjectState::execute_custom_action(const json& action) {
         }
         engine_.stop_all(std::chrono::milliseconds{0}, /*force_fade=*/false, spare);
     }
-    else if (type == "http-request" || type == "midi-note") {
-        // Same hand-off for both: the server has no HTTP client NOR a MIDI
-        // output of its own (Web MIDI only exists in a browser/Electron
-        // renderer), so set_external_action_handler's subscriber — wired by
-        // the control server to a doc_patch broadcast — does the real work
-        // on a connected client. See trigger_item's "action" (lighting cue)
-        // branch for where a midi-note action gets built.
+    else if (type == "http-request" || type == "midi-note" || type == "run-command") {
+        // Same hand-off for all three: the server has no HTTP client, MIDI
+        // output, or shell of its own (Web MIDI and process-spawning only
+        // exist in a browser/Electron renderer), so set_external_action_handler's
+        // subscriber — wired by the control server to a doc_patch broadcast —
+        // does the real work on a connected client. See trigger_item's
+        // "action" branch for where a midi-note/run-command action gets built.
         std::function<void(const json&)> handler;
         {
             std::lock_guard lock{mutex_};

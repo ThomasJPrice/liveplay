@@ -184,6 +184,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readMidiConfig: () => ipcRenderer.invoke('read-midi-config'),
   writeMidiConfig: (config) => ipcRenderer.invoke('write-midi-config', config),
 
+  // Run Command cue: fires a show-authored shell command (e.g. a Spotify
+  // fade script) and completes instantly, same shape as the Lighting Cue's
+  // MIDI send — the server has no shell of its own, so it hands this off
+  // via a doc_patch for a connected client (this process) to actually run.
+  runCommand: (command) => ipcRenderer.invoke('run-command', command),
+
   // LivePlay audio server lifecycle (C++ server spawned by main process)
   liveplayServer: {
     getConfig: () => ipcRenderer.invoke('liveplay-server:get-config'),

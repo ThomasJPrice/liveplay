@@ -477,6 +477,16 @@ export const useAudioEngine = () => {
         }
         break;
       }
+      case 'custom_action_run_command': {
+        // Same hand-off, for a Run Command cue's shell command — the server
+        // has no shell of its own either. Fire-and-forget via the Electron
+        // main process; no-op outside Electron (e.g. a browser client).
+        const a = patch.action;
+        if (a && typeof a.command === 'string') {
+          void window.electronAPI?.runCommand?.(a.command);
+        }
+        break;
+      }
     }
   });
 

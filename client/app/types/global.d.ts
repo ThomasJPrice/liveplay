@@ -107,6 +107,7 @@ declare global {
       getPendingOpenFile: () => Promise<{ filePath: string; kind: 'liveplay' | 'lpa' } | null>;
       readMidiConfig: () => Promise<Record<string, any>>;
       writeMidiConfig: (config: Record<string, any>) => Promise<{ success: boolean }>;
+      runCommand: (command: string) => Promise<{ success: boolean; error?: string }>;
       // Cart player window
       openCartPlayerWindow: (projectFolderPath: string) => Promise<void>;
       attachCartPlayerWindow: () => void;

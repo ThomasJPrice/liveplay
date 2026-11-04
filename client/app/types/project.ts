@@ -152,13 +152,22 @@ export interface MidiTriggerConfig {
                     // settings.midiCuelistMap
 }
 
-// Action item: a non-audio, instant playlist entry. One `kind` exists today
-// (`midi-trigger`); the union leaves room for e.g. `osc-trigger` later
-// without reshaping anything that already exists.
+// Runs a shell command (exactly as the show author typed it, e.g.
+// `spotifade down -d 20 -p`) on the Electron client's machine, then
+// completes instantly — same "fire and move on" shape as a Lighting Cue.
+// Fire-and-forget: nothing waits on the script's exit code or output.
+export interface RunCommandConfig {
+  command: string;
+}
+
+// Action item: a non-audio, instant playlist entry. `kind` selects which
+// config field below applies; the union leaves room for more kinds later
+// (e.g. `osc-trigger`) without reshaping anything that already exists.
 export interface ActionItem extends BaseItem {
   type: 'action';
-  kind: 'midi-trigger';
-  midiTrigger: MidiTriggerConfig;
+  kind: 'midi-trigger' | 'run-command';
+  midiTrigger?: MidiTriggerConfig;
+  runCommand?: RunCommandConfig;
   // Same field AudioItem uses — moves the head and optionally plays the
   // target immediately after firing (Start and End coincide for an instant
   // cue; see the server's trigger_item action-item branch).
@@ -171,11 +180,12 @@ export interface CustomAction {
   action: CustomActionType;
 }
 
-export type CustomActionType = 
+export type CustomActionType =
   | { type: 'play-item'; uuid: string }
   | { type: 'play-index'; index: number[] }
   | { type: 'stop-all' }
-  | { type: 'http-request'; request: HttpRequest };
+  | { type: 'http-request'; request: HttpRequest }
+  | { type: 'run-command'; command: string };
 
 export interface HttpRequest {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE';

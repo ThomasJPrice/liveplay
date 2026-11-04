@@ -1018,14 +1018,17 @@ bool ControlServer::start() {
     if (running_.exchange(true)) return true;
     install_routes();
 
-    // Hand custom http-request / midi-note actions off to clients. The
-    // server has neither an HTTP client nor a MIDI output of its own;
-    // broadcasting as a doc_patch lets any connected client do the real
-    // work (fetch, or MIDIOutput.send()). Best-effort fan-out; if no client
-    // is connected the action is silently dropped.
+    // Hand custom http-request / midi-note / run-command actions off to
+    // clients. The server has neither an HTTP client, a MIDI output, nor a
+    // shell of its own; broadcasting as a doc_patch lets any connected
+    // client do the real work (fetch, MIDIOutput.send(), or exec()).
+    // Best-effort fan-out; if no client is connected the action is silently
+    // dropped.
     state_.set_external_action_handler([this](const json& action) {
-        const std::string op = action.value("type", "") == "midi-note"
-            ? "custom_action_midi" : "custom_action_http";
+        const std::string t = action.value("type", "");
+        const std::string op = t == "midi-note"    ? "custom_action_midi"
+                              : t == "run-command"  ? "custom_action_run_command"
+                              :                        "custom_action_http";
         broadcast_doc_patch(json{
             {"type", "doc_patch"},
             {"op",   op},

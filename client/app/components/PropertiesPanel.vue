@@ -342,6 +342,22 @@
         </div>
       </div>
 
+      <!-- Run Command Tab — a Run Command cue (ActionItem, kind
+           'run-command') runs a shell command on the Electron client's
+           machine, then completes instantly (e.g. a Spotify fade script). -->
+      <div v-if="activeTab === 'runCommandTrigger'" class="tab-panel">
+        <div class="property-field">
+          <label>{{ t('runCommand.commandLabel') }}</label>
+          <input
+            type="text"
+            :value="runCommandText"
+            :placeholder="t('runCommand.commandPlaceholder')"
+            @change="onRunCommandChange"
+          />
+          <p class="field-hint">{{ t('runCommand.commandHelp') }}</p>
+        </div>
+      </div>
+
       <!-- Start Behavior Tab -->
       <div v-if="activeTab === 'startBehavior'" class="tab-panel">
         <div class="property-field">
@@ -611,13 +627,22 @@ const allTabs = computed<Tab[]>(() => [
   // startBehavior/endBehavior tabs below instead.
   { id: 'cueAdvance', label: t('properties.cueAdvance'), icon: 'move_down', types: ['audio', 'action'] },
   { id: 'lightingTrigger', label: t('lightingCue.dictionaryTitle'), icon: 'bolt', types: ['action'] },
+  { id: 'runCommandTrigger', label: t('runCommand.tabTitle'), icon: 'terminal', types: ['action'] },
   { id: 'startBehavior', label: t('properties.startBehavior'), icon: 'play_arrow', types: ['audio', 'group'] },
   { id: 'endBehavior', label: t('properties.endBehavior'), icon: 'stop_circle', types: ['audio', 'group'] },
 ]);
 
 const availableTabs = computed(() => {
   const t = selectedItem.value?.type;
-  return allTabs.value.filter(tab => !tab.types || (t && tab.types.includes(t as ItemTypeFilter)));
+  const kind = t === 'action' ? (selectedItem.value as any)?.kind : undefined;
+  return allTabs.value.filter(tab => {
+    if (tab.types && !(t && tab.types.includes(t as ItemTypeFilter))) return false;
+    // The two action-item trigger tabs are mutually exclusive by `kind`,
+    // not `type` — both are 'action', but only one config applies.
+    if (tab.id === 'lightingTrigger') return kind === 'midi-trigger';
+    if (tab.id === 'runCommandTrigger') return kind === 'run-command';
+    return true;
+  });
 });
 
 // Computed properties for behavior fields
@@ -705,6 +730,21 @@ function onMidiTriggerGoNoteChange(e: Event) {
   const v = parseInt((e.target as HTMLSelectElement).value, 10);
   touch('midiTrigger.goNote');
   midiTriggerGoNote.value = Number.isFinite(v) ? v : 0;
+  handleSave();
+}
+
+// Run Command cue (ActionItem, kind 'run-command') — same cast-computed
+// pattern as the lighting trigger fields above.
+const runCommandText = computed({
+  get: () => (audioItem.value as any)?.runCommand?.command ?? '',
+  set: (value: string) => {
+    if (!audioItem.value) return;
+    (audioItem.value as any).runCommand = { command: value };
+  }
+});
+function onRunCommandChange(e: Event) {
+  touch('runCommand.command');
+  runCommandText.value = (e.target as HTMLInputElement).value;
   handleSave();
 }
 
