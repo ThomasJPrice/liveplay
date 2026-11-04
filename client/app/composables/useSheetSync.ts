@@ -20,7 +20,7 @@
 // place rather than rebuilding them from scratch.
 // =====================================================================
 import { v4 as uuidv4 } from 'uuid';
-import type { AudioItem, GroupItem, BaseItem } from '~/types/project';
+import type { AudioItem, GroupItem, ActionItem, BaseItem } from '~/types/project';
 import { DEFAULT_GROUP_ITEM } from '~/types/project';
 
 export const SHEET_COLUMNS = [
@@ -29,6 +29,7 @@ export const SHEET_COLUMNS = [
   'End Behaviour',
   'Cue Advance', 'Cue Advance Target',
   'Bus', 'Volume', 'Media File', 'Duration', 'Notes',
+  'Lighting Cuelist', 'Lighting Channel',
 ] as const;
 
 const COL = Object.fromEntries(SHEET_COLUMNS.map((c, i) => [c, i])) as Record<typeof SHEET_COLUMNS[number], number>;
@@ -59,7 +60,7 @@ export interface FieldChange {
 
 export interface SheetDiff {
   /** New items to create (groups always; audio only when Media File matched an existing file). */
-  adds: Array<{ rowNumber: number; type: 'Scene' | 'Block' | 'Cue'; name: string }>;
+  adds: Array<{ rowNumber: number; type: 'Scene' | 'Block' | 'Cue' | 'Lighting'; name: string }>;
   /** Items present in the project but missing from the sheet — reported, never auto-deleted. */
   missingFromSheet: Array<{ uuid: string; name: string }>;
   /** Field-level changes on matched items. */
@@ -68,8 +69,10 @@ export interface SheetDiff {
   reordered: boolean;
   /** Rows that couldn't be applied at all (bad action value, ambiguous target name, unmatched media file...). */
   errors: SheetRowError[];
-  /** Built, ready-to-apply tree — only ever applied by applyDiff() after confirmation. */
-  _tree: (AudioItem | GroupItem)[];
+  /** Built, ready-to-apply tree — only ever applied by applyDiff() after confirmation. May
+   *  also contain ActionItem rows (Lighting cues), kept out of this union deliberately —
+   *  see project.ts — so this is typed loosely rather than widening that structural union. */
+  _tree: any[];
 }
 
 function busNameToId(buses: { id: string; name: string }[], name: string): string | undefined {
@@ -106,12 +109,17 @@ export function useSheetSync() {
   // ---- Flatten: project tree -> sheet rows --------------------------------
   function flattenToRows(): string[][] {
     const buses = server.buses as { id: string; name: string }[];
+    const midiMap = ((currentProject.value as any)?.settings?.midiCuelistMap ?? []) as Array<{ note: number; label: string }>;
+    const labelForNote = (note: number) => midiMap.find(r => r.note === note)?.label ?? '';
     const rows: string[][] = [];
 
-    const typeFor = (item: AudioItem | GroupItem, level: number): 'Scene' | 'Block' | 'Cue' =>
-      item.type === 'group' ? (level === 0 ? 'Scene' : 'Block') : 'Cue';
+    // Typed loosely here (not AudioItem | GroupItem) so an ActionItem — a
+    // third, intentionally-kept-narrow item type (see project.ts) — flows
+    // through this walk without widening the core structural unions.
+    const typeFor = (item: any, level: number): 'Scene' | 'Block' | 'Cue' | 'Lighting' =>
+      item.type === 'group' ? (level === 0 ? 'Scene' : 'Block') : item.type === 'action' ? 'Lighting' : 'Cue';
 
-    const walk = (items: (AudioItem | GroupItem)[], level: number) => {
+    const walk = (items: any[], level: number) => {
       for (const item of items) {
         const row = new Array(SHEET_COLUMNS.length).fill('');
         row[COL['UUID']] = item.uuid;
@@ -124,6 +132,14 @@ export function useSheetSync() {
         if (item.type === 'group') {
           row[COL['Start Behaviour']] = item.startBehavior?.action ?? 'play-first';
           row[COL['End Behaviour']] = item.endBehavior?.action ?? 'nothing';
+        } else if (item.type === 'action') {
+          const action = item as ActionItem;
+          row[COL['Cue Advance']] = action.cueAdvance?.action ?? 'no-action';
+          if (action.cueAdvance?.targetUuid) {
+            row[COL['Cue Advance Target']] = findItemByUuid(action.cueAdvance.targetUuid)?.displayName ?? '';
+          }
+          row[COL['Lighting Cuelist']] = labelForNote(action.midiTrigger?.goNote);
+          row[COL['Lighting Channel']] = String(action.midiTrigger?.channel ?? 1);
         } else {
           const audio = item as AudioItem;
           row[COL['Start Behaviour']] = audio.startBehavior?.action ?? 'nothing';
@@ -146,7 +162,7 @@ export function useSheetSync() {
       }
     };
 
-    walk(currentProject.value?.items ?? [], 0);
+    walk((currentProject.value?.items ?? []) as any[], 0);
     return rows;
   }
 
@@ -196,6 +212,8 @@ export function useSheetSync() {
     volume: string;
     mediaFile: string;
     notes: string;
+    lightingCuelist: string;
+    lightingChannel: string;
   }
 
   function parseRows(header: string[], rawRows: string[][]): { parsed: ParsedRow[]; errors: SheetRowError[] } {
@@ -238,6 +256,8 @@ export function useSheetSync() {
         volume: get(row, 'Volume'),
         mediaFile: get(row, 'Media File'),
         notes: get(row, 'Notes'),
+        lightingCuelist: get(row, 'Lighting Cuelist'),
+        lightingChannel: get(row, 'Lighting Channel'),
       };
     });
     return { parsed, errors };
@@ -278,13 +298,28 @@ export function useSheetSync() {
       if (it.type === 'audio' && it.mediaFileName) itemByMediaFile.set(it.mediaFileName, it as AudioItem);
     }
 
+    // Lighting cuelist dictionary (note <-> label), project-scoped.
+    const midiMap = ((currentProject.value as any)?.settings?.midiCuelistMap ?? []) as Array<{ note: number; label: string }>;
+    const resolveMidiNote = (label: string, rowNumber: number): number | undefined => {
+      if (!label) return undefined;
+      const row = midiMap.find(r => r.label === label);
+      if (!row) {
+        errors.push({ rowNumber, message: t('sheetSync.errorUnknownCuelist', { name: label }) });
+        return undefined;
+      }
+      return row.note;
+    };
+
     const adds: SheetDiff['adds'] = [];
     const changes: FieldChange[] = [];
 
     // Build the new tree by walking rows in order, using Level to nest.
-    // A stack of open containers' children arrays, indexed by level.
-    const rootChildren: (AudioItem | GroupItem)[] = [];
-    const stack: (AudioItem | GroupItem)[][] = [rootChildren];
+    // A stack of open containers' children arrays, indexed by level. Typed
+    // loosely (not AudioItem | GroupItem) so a Lighting row's ActionItem —
+    // kept deliberately out of those structural unions, see project.ts —
+    // can flow through without widening them.
+    const rootChildren: any[] = [];
+    const stack: any[][] = [rootChildren];
 
     for (const row of parsed) {
       if (row.level < 0 || row.level > stack.length) {
@@ -297,7 +332,8 @@ export function useSheetSync() {
       const parentChildren = stack[row.level];
 
       const isGroup = row.type === 'Scene' || row.type === 'Block';
-      let item: AudioItem | GroupItem | undefined = row.uuid ? existingByUuid.get(row.uuid) : undefined;
+      const isLighting = row.type === 'Lighting';
+      let item: any = row.uuid ? existingByUuid.get(row.uuid) : undefined;
 
       if (row.uuid && !item) {
         errors.push({ rowNumber: row.rowNumber, message: t('sheetSync.errorUnknownUuid', { name: row.name }) });
@@ -317,6 +353,20 @@ export function useSheetSync() {
             children: [],
           } as GroupItem;
           adds.push({ rowNumber: row.rowNumber, type: row.type as any, name: item.displayName });
+        } else if (isLighting) {
+          const goNote = resolveMidiNote(row.lightingCuelist, row.rowNumber);
+          if (goNote === undefined) continue;
+          const channel = row.lightingChannel ? Number(row.lightingChannel) || 1 : 1;
+          item = {
+            uuid: uuidv4(),
+            index: [],
+            type: 'action',
+            kind: 'midi-trigger',
+            displayName: row.name || t('sheetSync.untitledLighting'),
+            color: row.colour || '#DA1E28',
+            midiTrigger: { channel, goNote },
+          } as ActionItem;
+          adds.push({ rowNumber: row.rowNumber, type: 'Lighting', name: item.displayName });
         } else {
           const source = itemByMediaFile.get(row.mediaFile);
           if (!row.mediaFile || !source) {
@@ -360,6 +410,34 @@ export function useSheetSync() {
           } else if (row.endAction !== g.endBehavior?.action) {
             record('endBehavior', g.endBehavior?.action, row.endAction);
             g.endBehavior = { action: row.endAction as any };
+          }
+        }
+      } else if (item!.type === 'action') {
+        const act = item as ActionItem;
+        if (row.cueAdvanceAction) {
+          if (!CUE_ADVANCE_ACTIONS.includes(row.cueAdvanceAction as any)) {
+            errors.push({ rowNumber: row.rowNumber, message: t('sheetSync.errorBadCueAdvance', { value: row.cueAdvanceAction }) });
+          } else {
+            const targetUuid = row.cueAdvanceAction !== 'no-action'
+              ? resolveTargetUuid(row.cueAdvanceTarget, row.rowNumber) : undefined;
+            if (row.cueAdvanceAction !== act.cueAdvance?.action || targetUuid !== act.cueAdvance?.targetUuid) {
+              record('cueAdvance', act.cueAdvance?.action, row.cueAdvanceAction);
+              act.cueAdvance = { action: row.cueAdvanceAction as any, ...(targetUuid ? { targetUuid } : {}) };
+            }
+          }
+        }
+        if (row.lightingCuelist) {
+          const goNote = resolveMidiNote(row.lightingCuelist, row.rowNumber);
+          if (goNote !== undefined && goNote !== act.midiTrigger?.goNote) {
+            record('midiTrigger.goNote', act.midiTrigger?.goNote, goNote);
+            act.midiTrigger = { ...act.midiTrigger, goNote };
+          }
+        }
+        if (row.lightingChannel) {
+          const channel = Number(row.lightingChannel) || 1;
+          if (channel !== act.midiTrigger?.channel) {
+            record('midiTrigger.channel', act.midiTrigger?.channel, channel);
+            act.midiTrigger = { ...act.midiTrigger, channel };
           }
         }
       } else {

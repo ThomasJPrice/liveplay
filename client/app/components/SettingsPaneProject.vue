@@ -117,6 +117,48 @@
         </div>
       </section>
     </template>
+
+    <!-- ================================================================
+         Lighting cue dictionary: MIDI note -> a friendly label, matching
+         the macros already programmed into the lighting desk's own MIDI-In
+         Event Viewer (e.g. Onyx). Which MIDI OUTPUT PORT this goes to is a
+         machine setting (Settings > Controls), not here — this is the
+         show's own note/cuelist mapping.
+         ================================================================ -->
+    <h4 class="settings-group-title">{{ t('lightingCue.dictionaryTitle') }}</h4>
+    <p class="settings-pane-intro">{{ t('lightingCue.dictionaryHelp') }}</p>
+
+    <section
+      v-for="(row, i) in midiCuelistMap"
+      :key="i"
+      class="settings-field settings-row"
+    >
+      <div class="settings-row-lead">
+        <input
+          class="settings-input settings-input--note"
+          type="number"
+          min="0"
+          max="127"
+          :value="row.note"
+          :placeholder="t('lightingCue.dictionaryNote')"
+          @change="onCuelistRowChange(i, 'note', $event)"
+        />
+        <input
+          class="settings-input"
+          type="text"
+          :value="row.label"
+          :placeholder="t('lightingCue.dictionaryLabel')"
+          @change="onCuelistRowChange(i, 'label', $event)"
+        />
+      </div>
+      <button class="settings-btn settings-btn--danger" @click="removeCuelistRow(i)">
+        {{ t('lightingCue.dictionaryRemove') }}
+      </button>
+    </section>
+
+    <div class="settings-actions">
+      <button class="settings-btn" @click="addCuelistRow">{{ t('lightingCue.dictionaryAdd') }}</button>
+    </div>
   </div>
 
   <SheetSyncDiffDialog
@@ -187,6 +229,25 @@ function confirmPull() {
   sheetSync.applyDiff(pendingDiff.value);
   pendingDiff.value = null;
 }
+
+// ---- Lighting cue dictionary (MIDI note -> cuelist label) --------------
+const midiCuelistMap = computed(() => settings.value.midiCuelistMap || []);
+
+function onCuelistRowChange(index: number, field: 'note' | 'label', e: Event) {
+  const input = e.target as HTMLInputElement;
+  const rows = midiCuelistMap.value.map(r => ({ ...r }));
+  const row = rows[index];
+  if (!row) return;
+  if (field === 'note') row.note = Number(input.value) || 0;
+  else row.label = input.value;
+  applyPatch({ midiCuelistMap: rows });
+}
+function addCuelistRow() {
+  applyPatch({ midiCuelistMap: [...midiCuelistMap.value, { note: 0, label: '' }] });
+}
+function removeCuelistRow(index: number) {
+  applyPatch({ midiCuelistMap: midiCuelistMap.value.filter((_, i) => i !== index) });
+}
 </script>
 
 <style lang="scss" scoped>
@@ -202,6 +263,22 @@ function confirmPull() {
   border-top: 1px solid var(--color-border, #333);
 }
 .settings-help--warn { color: #ffc400; }
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.settings-row-lead {
+  display: flex;
+  gap: 8px;
+  flex: 1 1 auto;
+}
+.settings-input--note { flex: 0 0 70px; }
+.settings-btn--danger {
+  border-color: var(--color-accent-custom, #DA1E28);
+  color: var(--color-accent-custom, #DA1E28);
+}
 .settings-btn {
   padding: 6px 14px;
   border-radius: 4px;

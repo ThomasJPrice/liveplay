@@ -6,6 +6,7 @@
       'is-selected': isSelected,
       'is-group': item.type === 'group',
       'is-audio': item.type === 'audio',
+      'is-lighting': item.type === 'action',
       'is-playing': isPlaying,
       'show-mode': showMode,
       'drag-over-top': dragPosition === 'top',
@@ -65,7 +66,10 @@
         <span v-if="item.type === 'group'" class="item-icon">
           <span class="material-symbols-rounded">folder</span>
         </span>
-        
+        <span v-else-if="item.type === 'action'" class="item-icon item-icon--lighting">
+          <span class="material-symbols-rounded">bolt</span>
+        </span>
+
         <span v-if="item.type !== 'group'" class="item-name" :class="{ 'is-peaking': isPeaking }">{{ item.displayName }}</span>
         <!-- A playing group says what is playing inside it without being
              opened: its own name, with the sounding cue under it. Collapsed
@@ -156,8 +160,33 @@
             :title="t('behaviors.endPlay')"
           >skip_next</span>
         </div>
-        
+
+        <!-- Same Cue Advance icons as the audio block above — a lighting cue
+             has no startBehavior/duckingBehavior/endBehavior to show, so it
+             gets its own small block rather than forcing those fields onto
+             ActionItem just to reuse one v-if. -->
+        <div v-else-if="item.type === 'action'" class="behavior-indicators">
+          <span
+            v-if="item.cueAdvance?.action === 'start-play'"
+            class="material-symbols-rounded behavior-icon"
+            :title="t('behaviors.startPlay')"
+          >flash_on</span>
+          <span
+            v-else-if="item.cueAdvance?.action === 'end-advance'"
+            class="material-symbols-rounded behavior-icon"
+            :title="t('behaviors.endAdvance')"
+          >arrow_forward</span>
+          <span
+            v-else-if="item.cueAdvance?.action === 'end-play'"
+            class="material-symbols-rounded behavior-icon"
+            :title="t('behaviors.endPlay')"
+          >skip_next</span>
+        </div>
+
         <span v-if="item.type === 'audio'" class="item-duration">{{ durationDisplay }}</span>
+        <span v-else-if="item.type === 'action'" class="item-duration item-duration--lighting" :title="t('lightingCue.goNote', { note: item.midiTrigger.goNote })">
+          {{ lightingCuelistLabel }}
+        </span>
         <!-- A group's run time, the sum of what it will play (#63): visible
              collapsed, so a walk-in or interval playlist can be sized at a
              glance. While it plays, the time left in the whole group. -->
@@ -221,15 +250,19 @@
 
 <script setup lang="ts">
 import { v4 as uuidv4 } from 'uuid';
-import type { AudioItem, GroupItem, BaseItem } from '~/types/project';
+import type { AudioItem, GroupItem, ActionItem, BaseItem } from '~/types/project';
 import ActionButton from './ActionButton.vue';
 import { useOutputTarget, METER_COLORS } from '~/composables/useOutputTarget';
 import { calculatePerceivedLoudness } from '~/utils/audio';
 import { runTime, formatRunTime } from '~/utils/groupTiming';
 import { drawRowWaveform } from '~/utils/rowWaveform';
 
+// Widened to ActionItem here only — this component is exactly where a
+// lighting cue needs rendering branches, unlike the big structural arrays
+// (GroupItem.children, ProjectDocument.items) which stay narrow; see the
+// comment on GroupItem.children in project.ts for why those weren't widened.
 const props = defineProps<{
-  item: AudioItem | GroupItem;
+  item: AudioItem | GroupItem | ActionItem;
   depth: number;
 }>();
 
@@ -280,6 +313,17 @@ const busBadge = computed(() => {
     return { color: 'var(--color-text-disabled)', title: t('playlist.busRoutedMissing') };
   }
   return { color: bus.color, title: t('playlist.busRouted', { name: bus.name }) };
+});
+
+// A lighting cue shows the dictionary's label (e.g. "Main Cuelist") instead
+// of a raw note number where possible — the note is still in the tooltip.
+const lightingCuelistLabel = computed(() => {
+  if (props.item.type !== 'action') return '';
+  const note = (props.item as ActionItem).midiTrigger?.goNote;
+  const dictionary = (currentProject.value?.settings as any)?.midiCuelistMap as
+    Array<{ note: number; label: string }> | undefined;
+  const match = dictionary?.find(d => d.note === note);
+  return match?.label || t('lightingCue.unmappedNote', { note: note ?? '?' });
 });
 
 const { isRevealed, forgetReveal } = usePlaylistReveal();
@@ -1014,6 +1058,14 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
   .material-symbols-rounded {
     font-size: 18px;
   }
+
+  &.item-icon--lighting {
+    color: var(--color-warning, #f1c21b);
+  }
+}
+
+.item-duration--lighting {
+  color: var(--color-warning, #f1c21b);
 }
 
 .item-name {

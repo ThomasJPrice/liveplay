@@ -466,6 +466,17 @@ export const useAudioEngine = () => {
         // client of its own. Best-effort; failures are logged.
         void executeHttpRequest(patch.action?.request);
         break;
+      case 'custom_action_midi': {
+        // Same hand-off, for a lighting cue's MIDI Note-On — the server
+        // has no MIDI output of its own either. useMidiController owns
+        // the shared MIDIAccess/output-device config; this just asks it
+        // to send.
+        const a = patch.action;
+        if (a && typeof a.note === 'number') {
+          useMidiController().sendMidiNote(a.channel ?? 1, a.note, a.velocity ?? 127);
+        }
+        break;
+      }
     }
   });
 

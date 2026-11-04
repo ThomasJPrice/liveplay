@@ -311,6 +311,37 @@
         </div>
       </div>
 
+      <!-- Lighting Trigger Tab — a lighting cue (ActionItem, kind
+           'midi-trigger') fires a plain Note-On to a configured MIDI output
+           device, which your lighting desk macro turns into "GO on Cuelist
+           N". Which output PORT that goes to is a machine setting (Settings
+           > Controls), not here — this tab is just which note/channel. -->
+      <div v-if="activeTab === 'lightingTrigger'" class="tab-panel">
+        <div class="property-field">
+          <label>{{ t('lightingCue.goNoteLabel') }}</label>
+          <select :value="midiTriggerGoNote" @change="onMidiTriggerGoNoteChange">
+            <option v-if="midiCuelistDictionary.length === 0" value="" disabled>
+              {{ t('lightingCue.noOutputDevice') }}
+            </option>
+            <option v-for="row in midiCuelistDictionary" :key="row.note" :value="row.note">
+              {{ row.label }} ({{ row.note }})
+            </option>
+          </select>
+          <p class="field-hint">{{ t('lightingCue.dictionaryHelp') }}</p>
+        </div>
+
+        <div class="property-field">
+          <label>{{ t('lightingCue.channel') }}</label>
+          <input
+            type="number"
+            min="1"
+            max="16"
+            :value="midiTriggerChannel"
+            @change="onMidiTriggerChannelChange"
+          />
+        </div>
+      </div>
+
       <!-- Start Behavior Tab -->
       <div v-if="activeTab === 'startBehavior'" class="tab-panel">
         <div class="property-field">
@@ -552,31 +583,41 @@ const isCartItem = computed(() => {
 // Tab management
 const activeTab = ref('basic');
 
+type ItemTypeFilter = 'audio' | 'group' | 'action';
+
 interface Tab {
   id: string;
   label: string;
   icon: string;
-  audioOnly?: boolean;
+  // Absent = every item type. Replaces the old audioOnly boolean now that
+  // there are three item types rather than two — audio/group (bus routing,
+  // Start/End Behaviour) and audio/action (Cue Advance) need different
+  // combinations, not just "audio or not".
+  types?: ItemTypeFilter[];
 }
 
 const allTabs = computed<Tab[]>(() => [
   { id: 'basic', label: t('properties.basicInfo'), icon: 'info' },
-  // Not audioOnly: a group (Scene/Block) can carry a calling note just as
-  // usefully as a cue can.
+  // No `types`: a group (Scene/Block) or a lighting cue can carry a calling
+  // note just as usefully as an audio cue can.
   { id: 'notes', label: t('properties.notes'), icon: 'sticky_note_2' },
-  { id: 'media', label: t('properties.media'), icon: 'audio_file', audioOnly: true },
-  { id: 'playback', label: t('properties.playback'), icon: 'play_circle', audioOnly: true },
-  // Not audioOnly: a group carries a bus assignment too, which is how a whole
-  // folder of cues is routed in one move and what its children inherit.
-  { id: 'output', label: t('properties.output'), icon: 'speaker' },
-  { id: 'ducking', label: t('properties.ducking'), icon: 'volume_down', audioOnly: true },
-  { id: 'cueAdvance', label: t('properties.cueAdvance'), icon: 'move_down', audioOnly: true },
-  { id: 'startBehavior', label: t('properties.startBehavior'), icon: 'play_arrow' },
-  { id: 'endBehavior', label: t('properties.endBehavior'), icon: 'stop_circle' }
+  { id: 'media', label: t('properties.media'), icon: 'audio_file', types: ['audio'] },
+  { id: 'playback', label: t('properties.playback'), icon: 'play_circle', types: ['audio'] },
+  // audio/group only: a lighting cue fires a MIDI note, not audio — it has
+  // no bus to route through.
+  { id: 'output', label: t('properties.output'), icon: 'speaker', types: ['audio', 'group'] },
+  { id: 'ducking', label: t('properties.ducking'), icon: 'volume_down', types: ['audio'] },
+  // audio/action: both carry a cueAdvance field. Groups use their own
+  // startBehavior/endBehavior tabs below instead.
+  { id: 'cueAdvance', label: t('properties.cueAdvance'), icon: 'move_down', types: ['audio', 'action'] },
+  { id: 'lightingTrigger', label: t('lightingCue.dictionaryTitle'), icon: 'bolt', types: ['action'] },
+  { id: 'startBehavior', label: t('properties.startBehavior'), icon: 'play_arrow', types: ['audio', 'group'] },
+  { id: 'endBehavior', label: t('properties.endBehavior'), icon: 'stop_circle', types: ['audio', 'group'] },
 ]);
 
 const availableTabs = computed(() => {
-  return allTabs.value.filter(tab => !tab.audioOnly || selectedItem.value?.type === 'audio');
+  const t = selectedItem.value?.type;
+  return allTabs.value.filter(tab => !tab.types || (t && tab.types.includes(t as ItemTypeFilter)));
 });
 
 // Computed properties for behavior fields
@@ -631,6 +672,41 @@ const handleCueAdvanceIndexChange = (e: Event) => {
   audioItem.value.cueAdvance = next;
   handleSave();
 };
+
+// Lighting cue (ActionItem, kind 'midi-trigger') — reuses the same
+// `audioItem` cast-computed as everything else on this panel; `midiTrigger`
+// is a real field on the underlying object whenever selectedItem.type is
+// 'action', the cast is just TS-level (see project.ts's note on why
+// ActionItem isn't woven into the AudioItem|GroupItem structural types).
+const midiTriggerChannel = computed({
+  get: () => (audioItem.value as any)?.midiTrigger?.channel ?? 1,
+  set: (value) => {
+    if (!audioItem.value) return;
+    (audioItem.value as any).midiTrigger = { ...((audioItem.value as any).midiTrigger ?? {}), channel: value };
+  }
+});
+const midiTriggerGoNote = computed({
+  get: () => (audioItem.value as any)?.midiTrigger?.goNote ?? 0,
+  set: (value) => {
+    if (!audioItem.value) return;
+    (audioItem.value as any).midiTrigger = { ...((audioItem.value as any).midiTrigger ?? {}), goNote: value };
+  }
+});
+const midiCuelistDictionary = computed(() =>
+  ((currentProject.value?.settings as any)?.midiCuelistMap as Array<{ note: number; label: string }> | undefined) ?? []
+);
+function onMidiTriggerChannelChange(e: Event) {
+  const v = parseInt((e.target as HTMLInputElement).value, 10);
+  touch('midiTrigger.channel');
+  midiTriggerChannel.value = Number.isFinite(v) ? Math.max(1, Math.min(16, v)) : 1;
+  handleSave();
+}
+function onMidiTriggerGoNoteChange(e: Event) {
+  const v = parseInt((e.target as HTMLSelectElement).value, 10);
+  touch('midiTrigger.goNote');
+  midiTriggerGoNote.value = Number.isFinite(v) ? v : 0;
+  handleSave();
+}
 
 const startBehaviorAction = computed({
   get: () => {

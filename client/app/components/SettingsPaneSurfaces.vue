@@ -15,6 +15,23 @@
       <p v-if="connectedDevices.length === 0" class="settings-help">{{ t('controls.noDevices') }}</p>
     </section>
 
+    <!-- Output device: where lighting cues (ActionItem, kind 'midi-trigger')
+         send their GO note — a separate port from the control-surface INPUT
+         above, since in/out are usually different devices (or the two
+         directions of a loopback pair). -->
+    <section class="settings-field">
+      <label class="settings-label">
+        <span class="material-symbols-rounded">bolt</span>
+        {{ t('lightingCue.outputDevice') }}
+      </label>
+      <select class="settings-select" :value="preferredOutputDevice ?? ''" @change="handleOutputDeviceChange">
+        <option value="" disabled>{{ t('lightingCue.noOutputDevice') }}</option>
+        <option v-for="dev in connectedOutputDevices" :key="dev" :value="dev">{{ dev }}</option>
+      </select>
+      <p class="settings-help">{{ t('lightingCue.outputDeviceHelp') }}</p>
+      <p v-if="connectedOutputDevices.length === 0" class="settings-help">{{ t('controls.noDevices') }}</p>
+    </section>
+
     <template v-for="category in midiCategories" :key="category">
       <div class="binding-group">
         <div class="category-header">{{ t(categoryLabelKey(category)) }}</div>
@@ -98,7 +115,9 @@ const { t } = useLocalization();
 const {
   config: midiConfig,
   connectedDevices,
+  connectedOutputDevices,
   preferredDevice,
+  preferredOutputDevice,
   learning,
   startLearn,
   stopLearn,
@@ -106,6 +125,7 @@ const {
   clearBinding: clearMidiBinding,
   clearAllBindings,
   setPreferredDevice,
+  setPreferredOutputDevice,
   setMasterVolumeMultiplier,
 } = useMidiController();
 
@@ -182,6 +202,10 @@ const handleMidiClear = (actionId: MidiActionId) => clearMidiBinding(actionId);
 
 const handleDeviceChange = (e: Event) => {
   setPreferredDevice((e.target as HTMLSelectElement).value || null);
+};
+
+const handleOutputDeviceChange = (e: Event) => {
+  setPreferredOutputDevice((e.target as HTMLSelectElement).value || null);
 };
 
 // Escape cancels an armed Learn and stops there, so abandoning one binding
