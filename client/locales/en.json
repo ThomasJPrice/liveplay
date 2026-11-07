@@ -482,6 +482,7 @@
     "noSpreadsheet": "No spreadsheet is configured for this show yet.",
     "untitledGroup": "Untitled",
     "untitledLighting": "Untitled Lighting Cue",
+    "untitledPlaceholderAudio": "Untitled Cue (no media)",
     "diffTitle": "Review changes from Google Sheets",
     "diffEmpty": "No changes — the sheet already matches the show.",
     "diffErrors": "{count} row(s) couldn't be applied",
@@ -517,7 +518,8 @@
     "errorBadCueAdvance": "\"{value}\" isn't a valid Cue Advance (use no-action, start-advance, start-play, end-advance or end-play).",
     "errorUnknownBus": "No bus named \"{name}\" was found.",
     "errorBadVolume": "\"{value}\" isn't a valid Volume (must be 0–2).",
-    "errorUnknownCuelist": "No lighting cuelist named \"{name}\" was found in the project's dictionary."
+    "errorUnknownCuelist": "No lighting cuelist named \"{name}\" was found in the project's dictionary.",
+    "errorDuplicateUuid": "This row's UUID is also used by row(s) {rows} — only one row may use a given UUID. Clear the UUID cell on the row(s) that should become new cues."
   },
   "serverSettings": {
     "title": "LivePlay Server",
