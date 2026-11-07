@@ -24,7 +24,7 @@ import type { AudioItem, GroupItem, ActionItem, BaseItem } from '~/types/project
 import { DEFAULT_GROUP_ITEM } from '~/types/project';
 
 export const SHEET_COLUMNS = [
-  'UUID', 'Level', 'Type', 'Name', 'Colour',
+  'UUID', 'Level', 'Type', 'Name', 'Colour', 'Page',
   'Start Behaviour', 'Start Target',
   'End Behaviour',
   'Cue Advance', 'Cue Advance Target',
@@ -127,6 +127,7 @@ export function useSheetSync() {
         row[COL['Type']] = typeFor(item, level);
         row[COL['Name']] = item.displayName ?? '';
         row[COL['Colour']] = item.color ?? '';
+        row[COL['Page']] = item.pageNumber ?? '';
         row[COL['Notes']] = item.notes ?? '';
 
         if (item.type === 'group') {
@@ -203,6 +204,7 @@ export function useSheetSync() {
     type: string;
     name: string;
     colour: string;
+    page: string;
     startAction: string;
     startTarget: string;
     endAction: string;
@@ -247,6 +249,7 @@ export function useSheetSync() {
         type: get(row, 'Type'),
         name: get(row, 'Name'),
         colour: get(row, 'Colour'),
+        page: get(row, 'Page'),
         startAction: get(row, 'Start Behaviour'),
         startTarget: get(row, 'Start Target'),
         endAction: get(row, 'End Behaviour'),
@@ -389,7 +392,8 @@ export function useSheetSync() {
       };
       if (row.name && row.name !== item!.displayName) { record('displayName', item!.displayName, row.name); item!.displayName = row.name; }
       if (row.colour && row.colour !== item!.color) { record('color', item!.color, row.colour); item!.color = row.colour; }
-      // Same convention as name/colour: an empty Notes cell means "untouched"
+      if (row.page && row.page !== (item!.pageNumber ?? '')) { record('pageNumber', item!.pageNumber, row.page); item!.pageNumber = row.page; }
+      // Same convention as name/colour/page: an empty Notes cell means "untouched"
       // (a sheet can't distinguish "blank on purpose" from "never filled in"),
       // not "clear the note" — clearing stays a Properties-panel action.
       if (row.notes && row.notes !== (item!.notes ?? '')) { record('notes', item!.notes, row.notes); item!.notes = row.notes; }

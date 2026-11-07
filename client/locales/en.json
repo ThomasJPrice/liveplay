@@ -496,6 +496,7 @@
     "diffApply": "Apply",
     "fieldName": "Name",
     "fieldColour": "Colour",
+    "fieldPage": "Page Number",
     "fieldStartBehaviour": "Start Behaviour",
     "fieldEndBehaviour": "End Behaviour",
     "fieldCueAdvance": "Cue Advance",
