@@ -614,15 +614,18 @@ const itemStyle = computed(() => {
   const styles: any = {
     marginLeft: `${props.depth * 24}px`,
   };
-  
-  if (isPlaying.value || isGroupPlaying.value) {
-    // Playing: 50% opacity background
-    styles.backgroundColor = hexToRgba(props.item.color, 0.5);
-  } else {
-    // Inactive: 25% opacity background
-    styles.backgroundColor = hexToRgba(props.item.color, 0.25);
-  }
-  
+
+  const alpha = (isPlaying.value || isGroupPlaying.value) ? 0.5 : 0.25;
+  // Two layers: an opaque base fixed to the page background, then the
+  // item's own tint painted on top of THAT (not whatever's truly behind the
+  // row in the DOM). A nested cue sits over its parent group's own tinted
+  // background — painting the tint over a fixed base first means a cue's
+  // own colour always reads the same regardless of nesting, while the
+  // group's colour still shows through in the gaps around and between rows
+  // (the indent gutter, margin-bottom), which is the part worth keeping.
+  styles.backgroundColor = 'var(--color-background)';
+  styles.backgroundImage = `linear-gradient(${hexToRgba(props.item.color, alpha)}, ${hexToRgba(props.item.color, alpha)})`;
+
   return styles;
 });
 

@@ -21,7 +21,7 @@
 // =====================================================================
 import { v4 as uuidv4 } from 'uuid';
 import type { AudioItem, GroupItem, ActionItem, BaseItem } from '~/types/project';
-import { DEFAULT_GROUP_ITEM } from '~/types/project';
+import { DEFAULT_GROUP_ITEM, DEFAULT_AUDIO_ITEM, duckingDefaultsForImport } from '~/types/project';
 
 export const SHEET_COLUMNS = [
   'UUID', 'Level', 'Type', 'Name', 'Colour', 'Page',
@@ -271,6 +271,29 @@ export function useSheetSync() {
     const buses = server.buses as { id: string; name: string }[];
     const { parsed, errors } = parseRows(header, rawRows);
 
+    // A UUID cell copy-pasted onto a second row (e.g. duplicating a row in
+    // the sheet to start a new cue, without clearing its UUID) would
+    // otherwise make two rows clone and re-add the SAME existing item —
+    // silently producing a tree with a duplicate uuid, where clicking one
+    // occurrence can resolve to the other. Caught here instead, per row
+    // after the first.
+    const uuidRowNumbers = new Map<string, number[]>();
+    for (const row of parsed) {
+      if (!row.uuid) continue;
+      const list = uuidRowNumbers.get(row.uuid) ?? [];
+      list.push(row.rowNumber);
+      uuidRowNumbers.set(row.uuid, list);
+    }
+    for (const [, rowNumbers] of uuidRowNumbers) {
+      if (rowNumbers.length < 2) continue;
+      for (const rowNumber of rowNumbers) {
+        errors.push({
+          rowNumber,
+          message: t('sheetSync.errorDuplicateUuid', { rows: rowNumbers.join(', ') }),
+        });
+      }
+    }
+
     const existingByUuid = new Map<string, AudioItem | GroupItem>();
     for (const it of getAllItemsFlat() as (AudioItem | GroupItem)[]) existingByUuid.set(it.uuid, it);
 
@@ -338,17 +361,19 @@ export function useSheetSync() {
       const isLighting = row.type === 'Lighting';
       let item: any = row.uuid ? existingByUuid.get(row.uuid) : undefined;
 
-      if (row.uuid && !item) {
-        errors.push({ rowNumber: row.rowNumber, message: t('sheetSync.errorUnknownUuid', { name: row.name }) });
-        continue;
-      }
-
-      if (!row.uuid) {
-        // New row.
+      // No existing item matches — either the UUID cell was blank (a row
+      // meant to create a new cue), or it names a UUID the project doesn't
+      // currently have (the cue was deleted from the app, or the whole
+      // project was rebuilt from scratch). Both are treated as "recreate
+      // it" rather than an error, which also makes the sheet usable as a
+      // backup/restore source: when `row.uuid` is set, it's reused for the
+      // recreated item instead of minting a fresh one, so the sheet and the
+      // restored project agree on identity going forward.
+      if (!item) {
         if (isGroup) {
           item = {
             ...(DEFAULT_GROUP_ITEM as GroupItem),
-            uuid: uuidv4(),
+            uuid: row.uuid || uuidv4(),
             index: [],
             displayName: row.name || t('sheetSync.untitledGroup'),
             color: row.colour || (DEFAULT_GROUP_ITEM.color as string),
@@ -361,7 +386,7 @@ export function useSheetSync() {
           if (goNote === undefined) continue;
           const channel = row.lightingChannel ? Number(row.lightingChannel) || 1 : 1;
           item = {
-            uuid: uuidv4(),
+            uuid: row.uuid || uuidv4(),
             index: [],
             type: 'action',
             kind: 'midi-trigger',
@@ -370,13 +395,58 @@ export function useSheetSync() {
             midiTrigger: { channel, goNote },
           } as ActionItem;
           adds.push({ rowNumber: row.rowNumber, type: 'Lighting', name: item.displayName });
+        } else if (!row.mediaFile) {
+          // No Media File at all — a deliberate placeholder (e.g. a cue
+          // you're scripting before the recording/edit exists), same as
+          // the playlist's own "Add Empty Audio" button. A Media File that
+          // IS set but matches nothing is still an error below; only a
+          // genuinely blank cell is treated as intentional.
+          item = {
+            ...DEFAULT_AUDIO_ITEM,
+            ...duckingDefaultsForImport((currentProject.value as any)?.settings?.defaultDuckingMode),
+            uuid: row.uuid || uuidv4(),
+            index: [],
+            displayName: row.name || t('sheetSync.untitledPlaceholderAudio'),
+            type: 'audio',
+            mediaFileName: '',
+            mediaPath: '',
+            waveformPath: '',
+            waveform: undefined,
+            outPoint: 0,
+            duration: 0,
+          } as AudioItem;
+          adds.push({ rowNumber: row.rowNumber, type: 'Cue', name: item.displayName });
         } else {
           const source = itemByMediaFile.get(row.mediaFile);
-          if (!row.mediaFile || !source) {
+          if (source) {
+            item = { ...source, uuid: row.uuid || uuidv4(), index: [], displayName: row.name || source.displayName } as AudioItem;
+          } else if (row.uuid) {
+            // Restoring a deleted cue (or the whole project): nothing left
+            // in the project to clone trim/fade settings from, but the
+            // media file itself is almost always still sitting in the
+            // project's media folder — point straight at it by name,
+            // matching the normal import path's own mediaPath convention.
+            // Duration/waveform are unknown until the file is reopened;
+            // the playlist's missing-waveform scan + first playback fill
+            // them back in, same as any cue missing that data.
+            item = {
+              ...DEFAULT_AUDIO_ITEM,
+              ...duckingDefaultsForImport((currentProject.value as any)?.settings?.defaultDuckingMode),
+              uuid: row.uuid,
+              index: [],
+              displayName: row.name || row.mediaFile,
+              type: 'audio',
+              mediaFileName: row.mediaFile,
+              mediaPath: `media/${row.mediaFile}`,
+              waveformPath: `waveforms/${row.uuid}.json`,
+              waveform: undefined,
+              outPoint: 0,
+              duration: 0,
+            } as AudioItem;
+          } else {
             errors.push({ rowNumber: row.rowNumber, message: t('sheetSync.errorUnmatchedMedia', { name: row.name || row.mediaFile }) });
             continue;
           }
-          item = { ...source, uuid: uuidv4(), index: [], displayName: row.name || source.displayName } as AudioItem;
           adds.push({ rowNumber: row.rowNumber, type: 'Cue', name: item.displayName });
         }
       } else {
