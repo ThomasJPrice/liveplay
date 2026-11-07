@@ -95,6 +95,7 @@ const isEmpty = computed(() => {
 const FIELD_LABELS: Record<string, string> = {
   displayName: 'sheetSync.fieldName',
   color: 'sheetSync.fieldColour',
+  pageNumber: 'sheetSync.fieldPage',
   startBehavior: 'sheetSync.fieldStartBehaviour',
   endBehavior: 'sheetSync.fieldEndBehaviour',
   cueAdvance: 'sheetSync.fieldCueAdvance',
