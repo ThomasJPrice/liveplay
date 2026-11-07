@@ -15,6 +15,11 @@
 // figure is then how long the finite part lasts, a lower bound.
 import type { AudioItem, GroupItem } from '~/types/project';
 
+// Typed AudioItem | GroupItem like the rest of this file (see project.ts's
+// note on why ActionItem stays out of that structural union), but a group's
+// children can hold one at runtime (a Lighting/Run Command cue) — runTime()
+// and remainingTime() both check item.type explicitly before treating
+// anything as a GroupItem, so an action item is never cast as one here.
 type Item = AudioItem | GroupItem;
 
 export interface RunTime {
@@ -43,6 +48,13 @@ export function runTime(item: Item): RunTime {
     const a = item as AudioItem;
     return { seconds: trimmedLength(a), indefinite: a.endBehavior?.action === 'loop' };
   }
+  // A Lighting/Run Command cue (ActionItem) fires and completes instantly —
+  // same shape as the empty-audio placeholder, zero run time. Not a
+  // GroupItem despite living in `children` at runtime; without this check
+  // the group branch below reads its (nonexistent) .children and throws.
+  if (item.type !== 'group') {
+    return { seconds: 0, indefinite: false };
+  }
   const g = item as GroupItem;
   const parts = (g.children || []).map(runTime);
   const indefinite = parts.some(p => p.indefinite);
@@ -63,6 +75,10 @@ export function remainingTime(item: Item, playing: Map<string, PlayingCue>): num
     const c = playing.get(item.uuid);
     return c ? Math.max(0, c.duration - c.currentTime) : null;
   }
+  // An action item is never "playing" in the duration sense (see runTime()
+  // above) and was already safe here (g.children guarded below), but made
+  // explicit for the same reason as runTime()'s check.
+  if (item.type !== 'group') return null;
   const g = item as GroupItem;
   const children = g.children || [];
   if (!isSequential(g)) {

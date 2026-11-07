@@ -23,6 +23,13 @@ export interface BaseItem {
    * whatever's currently playing and queued up next while running a show.
    */
   notes?: string;
+  /**
+   * The script/running-order page this cue falls on (e.g. "12", "12A") —
+   * free text, not a number, since page numbering in a real script isn't
+   * always purely numeric. Shown in the main cuelist so the operator can
+   * follow along against a paper script without opening Properties.
+   */
+  pageNumber?: string;
 }
 
 // Audio-specific properties

@@ -62,7 +62,11 @@
         </button>
         
         <span class="item-index">{{ indexDisplay }}</span>
-        
+
+        <span v-if="item.pageNumber" class="item-page" :title="t('properties.pageNumber')">
+          {{ t('playlist.pageNumberBadge', { page: item.pageNumber }) }}
+        </span>
+
         <span v-if="item.type === 'group'" class="item-icon">
           <span class="material-symbols-rounded">folder</span>
         </span>
@@ -1056,6 +1060,17 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
   font-size: 0.95em;
   color: var(--color-text-secondary);
   min-width: 29px;
+}
+
+.item-page {
+  font-size: 0.8em;
+  color: var(--color-text-secondary);
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-sm, 4px);
+  padding: 1px 5px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .item-icon {
