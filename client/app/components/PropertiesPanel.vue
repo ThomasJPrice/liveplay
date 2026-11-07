@@ -34,6 +34,17 @@
         </div>
 
         <div class="property-field">
+          <label>{{ t('properties.pageNumber') }}</label>
+          <input
+            :value="shown('pageNumber', selectedItem.pageNumber || '')"
+            :placeholder="mixed('pageNumber') ? t('properties.multipleValues') : t('properties.pageNumberPlaceholder')"
+            type="text"
+            @change="onText('pageNumber')($event)"
+          />
+          <p class="property-help">{{ t('properties.pageNumberHelp') }}</p>
+        </div>
+
+        <div class="property-field">
           <label>{{ t('properties.color') }}</label>
           <div class="color-picker">
             <button
