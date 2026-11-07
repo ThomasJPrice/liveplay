@@ -3149,7 +3149,7 @@ void ProjectState::apply_cue_advance(const std::string& source_uuid,
     }
 }
 
-std::string ProjectState::resolve_selection_target_locked(const std::string& uuid) {
+std::string ProjectState::resolve_selection_target_locked(const std::string& uuid, bool skip_empty_audio) {
     std::string current = uuid;
     for (int hops = 0; hops < 100 && !current.empty(); ++hops) {
         json* found = find_item_json_locked(current);
@@ -3175,6 +3175,7 @@ std::string ProjectState::resolve_selection_target_locked(const std::string& uui
         if (type == "audio") {
             const auto path = resolve_media_path(*found, document_.value("folderPath", std::string{}));
             if (!path.empty()) return current;  // has real media — this is the target
+            if (!skip_empty_audio) return current;  // land on the placeholder itself
             // "Add Empty Audio" placeholder (no resolvable media): skip to
             // whatever's next in flat document order.
             const auto next = structural_next_locked(current);
@@ -3720,12 +3721,12 @@ std::string ProjectState::selected_item_uuid() const {
     return selected_item_uuid_;
 }
 
-bool ProjectState::set_selected_item(const std::string& uuid) {
+bool ProjectState::set_selected_item(const std::string& uuid, bool skip_empty_audio) {
     std::function<void(const json&)> cb;
     std::string resolved;
     {
         std::lock_guard lock{mutex_};
-        resolved = uuid.empty() ? uuid : resolve_selection_target_locked(uuid);
+        resolved = uuid.empty() ? uuid : resolve_selection_target_locked(uuid, skip_empty_audio);
         if (selected_item_uuid_ == resolved) return false;
         selected_item_uuid_ = resolved;
         cb = ui_state_broadcaster_;
@@ -3771,11 +3772,16 @@ std::string ProjectState::step_selection(int delta,
             target = flat[static_cast<std::size_t>(std::clamp(idx + delta, 0LL, last))];
         }
     }
-    set_selected_item(target);
-    // set_selected_item resolves `target` further (play-first redirect /
-    // empty-cue skip) before storing it — return what was actually stored,
-    // not the pre-resolution candidate, so callers (the HTTP/WS response)
-    // never report a uuid that isn't really the selection.
+    // Arrow-key stepping is navigation for the operator, same as a click —
+    // it must land on exactly the adjacent item, not skip over an "Add Empty
+    // Audio"/placeholder cue the way GO/Cue-Advance do. Otherwise PREV/NEXT
+    // through a run of not-yet-linked placeholder cues (e.g. freshly bulk
+    // imported from a sheet) chains forward past all of them at once.
+    set_selected_item(target, /*skip_empty_audio=*/false);
+    // set_selected_item still resolves a play-first group redirect before
+    // storing it — return what was actually stored, not the pre-resolution
+    // candidate, so callers (the HTTP/WS response) never report a uuid that
+    // isn't really the selection.
     return selected_item_uuid();
 }
 

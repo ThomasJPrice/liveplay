@@ -607,7 +607,16 @@ public:
     // uuid of the selected playlist item, or empty when nothing is selected.
     std::string selected_item_uuid() const;
     // Select an item by uuid. Pass an empty string to clear the selection.
-    bool set_selected_item(const std::string& uuid);
+    // `skip_empty_audio` controls whether an "Add Empty Audio"/placeholder
+    // cue (no resolvable media) gets redirected forward to the next real
+    // target — true for GO/Cue-Advance/PREV/NEXT, where that's the whole
+    // point (a marker cue nobody wants to actually stop on), false for a
+    // direct click, which must always land on exactly the cue clicked so an
+    // operator can select, inspect and fix up a placeholder (e.g. one bulk
+    // imported from a Google Sheet with media still to be linked) rather
+    // than selection silently sailing past every one of them to whatever
+    // real cue happens to follow.
+    bool set_selected_item(const std::string& uuid, bool skip_empty_audio = true);
     // Move the selection `delta` places through the flattened playlist — the
     // same depth-first order (group node, then its children) that the client's
     // Select Up / Select Down keys walk. The ends clamp rather than wrap.
@@ -1641,7 +1650,7 @@ private:
     // against a misconfigured chain. Used by set_selected_item/step_selection
     // so the stored selection is always already a real, playable target.
     // Caller must hold mutex_.
-    std::string resolve_selection_target_locked(const std::string& uuid);
+    std::string resolve_selection_target_locked(const std::string& uuid, bool skip_empty_audio = true);
 
     // Shared by play_item's Start Advance/Start Play hook, run_end_behaviour's
     // End Advance/End Play hook, and trigger_item's action-item (lighting

@@ -1894,7 +1894,10 @@ static std::string handle_ws_message(crow::websocket::connection& conn,
             std::string uuid;
             if (j.contains("item_uuid") && j["item_uuid"].is_string())
                 uuid = j["item_uuid"].get<std::string>();
-            state.set_selected_item(uuid);
+            // A direct click always lands on exactly what was clicked — no
+            // empty-audio-placeholder skip (that's for GO/Cue-Advance/PREV/
+            // NEXT only; see set_selected_item's doc comment).
+            state.set_selected_item(uuid, /*skip_empty_audio=*/false);
         }
         else if (type == "select_step") {
             // Move the shared selection through the flattened playlist.
@@ -3299,7 +3302,9 @@ void ControlServer::install_routes() {
                     if (uuid.empty()) return json_err(404, "playlist is empty");
                 } else if (j.contains("itemUuid") && j["itemUuid"].is_string()) {
                     uuid = j["itemUuid"].get<std::string>();
-                    state_.set_selected_item(uuid);
+                    // Explicit uuid select (matches the WS set_selection path):
+                    // lands on exactly this item, no empty-audio skip.
+                    state_.set_selected_item(uuid, /*skip_empty_audio=*/false);
                 } else {
                     return json_err(400, "expected \"itemUuid\" or \"delta\"");
                 }
