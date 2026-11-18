@@ -1,9 +1,9 @@
 name: Build and Release
 
 # Cuts a release whenever the monorepo root version (package.json) changes on
-# main. Builds the C++ server and the Electron client together on each
-# platform — Windows x64, macOS Intel (x64), macOS Apple Silicon (arm64), and
-# Linux x64 — and publishes a single GitHub Release with all installers.
+# main. Builds the C++ server and the Electron client for Windows x64 only
+# (this fork only ships/runs on Windows) and publishes a GitHub Release with
+# the installer.
 on:
   push:
     branches:
@@ -60,34 +60,6 @@ jobs:
             artifact_name: windows-build
             electron_args: --win --x64 --publish never
             cmake_args: ""
-          # 22.04, not latest: a binary only runs on a glibc at least as new as
-          # the one it was built against, and 24.04's 2.39 shut out every
-          # distro older than that (issue #71). GCC 13 comes from the toolchain
-          # PPA below, for C++20 <format>.
-          - os: ubuntu-22.04
-            label: Linux x64
-            triplet: x64-linux
-            artifact_name: linux-build
-            electron_args: --linux --x64 --publish never
-            cmake_args: ""
-          # Cross-compiled for x86_64 on an Apple Silicon runner. GitHub is
-          # retiring the Intel macOS runners (macos-15-intel), so instead of a
-          # native Intel host we build the x64 slice on arm64: Apple clang is a
-          # cross-compiler (CMAKE_OSX_ARCHITECTURES=x86_64), vcpkg builds the
-          # x64-osx triplet on the arm64 host, and electron-builder --x64 pulls
-          # the prebuilt x64 Electron. Output artifact names are unchanged.
-          - os: macos-latest
-            label: macOS Intel (x64)
-            triplet: x64-osx
-            artifact_name: macos-x64-build
-            electron_args: --mac --x64 --publish never
-            cmake_args: "-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_OSX_ARCHITECTURES=x86_64"
-          - os: macos-latest
-            label: macOS Apple Silicon (arm64)
-            triplet: arm64-osx
-            artifact_name: macos-arm64-build
-            electron_args: --mac --arm64 --publish never
-            cmake_args: "-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.label }}
 
@@ -114,40 +86,11 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Install Linux build and audio dependencies
-        if: runner.os == 'Linux'
-        run: |
-          # The GitHub-hosted runners ship extra Microsoft apt repos
-          # (azure-cli, packages.microsoft.com/prod) that we don't use and that
-          # intermittently serve a broken/unsigned InRelease file, which makes
-          # `apt-get update` fail with exit code 100. Drop them first.
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
-                     /etc/apt/sources.list.d/azure-cli.list \
-                     /etc/apt/sources.list.d/azure-cli.sources
-          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-13 g++-13
-          echo "CC=gcc-13" >> "$GITHUB_ENV"
-          echo "CXX=g++-13" >> "$GITHUB_ENV"
-          # libsodium's vcpkg port runs autoreconf on Unix platforms.
-          sudo apt-get install -y --no-install-recommends \
-            ninja-build pkg-config \
-            autoconf autoconf-archive automake libtool \
-            libasound2-dev libpulse-dev libjack-jackd2-dev libx11-dev
-
-      - name: Install macOS build tools
-        if: runner.os == 'macOS'
-        run: |
-          # Required for libsodium on both arm64 and cross-compiled x64 builds.
-          brew install ninja pkg-config autoconf autoconf-archive automake libtool
-
       - name: Install Windows build tools
-        if: runner.os == 'Windows'
         shell: pwsh
         run: choco install ninja -y
 
       - name: Configure MSVC environment
-        if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
@@ -163,8 +106,7 @@ jobs:
             ${{ matrix.cmake_args }}
           cmake --build server/build --config Release -j
 
-      - name: Stage server binary for electron-builder (Windows)
-        if: runner.os == 'Windows'
+      - name: Stage server binary for electron-builder
         shell: pwsh
         run: |
           # Ninja produces a single-config build; electron-builder expects
@@ -175,10 +117,6 @@ jobs:
           }
           Get-ChildItem "server/build" -Filter "*.dll" -ErrorAction SilentlyContinue |
             ForEach-Object { Copy-Item $_.FullName "server/build/Release/" -Force }
-
-      - name: Build macOS server .app bundle
-        if: runner.os == 'macOS'
-        run: node scripts/build-server-app-mac.js
 
       # -------------------------------------------------------------------
       # Client (Nuxt + Electron)
@@ -256,13 +194,6 @@ jobs:
           # Copy installer artefacts only (skip unpacked dirs / debug yaml).
           for f in client/dist-electron/*.exe \
                    client/dist-electron/*.exe.blockmap \
-                   client/dist-electron/*.dmg \
-                   client/dist-electron/*.dmg.blockmap \
-                   client/dist-electron/*.zip \
-                   client/dist-electron/*.zip.blockmap \
-                   client/dist-electron/*.AppImage \
-                   client/dist-electron/*.deb \
-                   client/dist-electron/*.rpm \
                    client/dist-electron/latest*.yml; do
             [ -e "$f" ] && cp "$f" build/
           done
@@ -293,96 +224,19 @@ jobs:
           name: windows-build
           path: ./artifacts
 
-      - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-build
-          path: ./artifacts
-
-      # macOS artifacts go to per-arch directories so their two latest-mac.yml
-      # files don't clobber each other — they are merged below.
-      - name: Download macOS Intel artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: macos-x64-build
-          path: ./artifacts-mac-x64
-
-      - name: Download macOS Apple Silicon artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: macos-arm64-build
-          path: ./artifacts-mac-arm64
-
-      # The Intel and Apple-Silicon jobs each emit their own latest-mac.yml
-      # listing only that arch's files. electron-updater's MacUpdater filters
-      # the yml's `files` list by the running architecture (keeping arm64-named
-      # files on Apple Silicon, dropping them on Intel), so a release must ship
-      # ONE latest-mac.yml whose `files` array contains BOTH arches. Otherwise
-      # whichever yml is published last wins and the other arch's auto-update
-      # fails with ERR_UPDATER_ZIP_FILE_NOT_FOUND. Merge the two here.
-      - name: Merge macOS artifacts and update metadata
-        run: |
-          set -euo pipefail
-          # Drop the runner's flaky pre-installed Microsoft apt repos (see the
-          # Linux build step) so `apt-get update` can't fail with exit code 100.
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
-                     /etc/apt/sources.list.d/azure-cli.list \
-                     /etc/apt/sources.list.d/azure-cli.sources
-          # python3-yaml gives us PyYAML without tripping PEP 668 on the runner.
-          sudo apt-get update -qq && sudo apt-get install -y -qq python3-yaml
-          # Installer files (.dmg/.zip + blockmaps) have distinct per-arch names
-          # and never collide, so copy them all into ./artifacts.
-          for d in artifacts-mac-x64 artifacts-mac-arm64; do
-            [ -d "$d" ] || continue
-            find "$d" -maxdepth 1 -type f ! -name 'latest-mac.yml' -exec cp -f {} artifacts/ \;
-          done
-          python3 - <<'PY'
-          import os, yaml
-          srcs = [p for p in ("artifacts-mac-x64/latest-mac.yml",
-                              "artifacts-mac-arm64/latest-mac.yml") if os.path.exists(p)]
-          docs = []
-          for p in srcs:
-              with open(p) as fh:
-                  docs.append(yaml.safe_load(fh))
-          if not docs:
-              raise SystemExit("No latest-mac.yml found to merge")
-          # Base on the first doc; union the `files` arrays (by url) so both the
-          # x64 and arm64 zips/dmgs are advertised in one manifest.
-          merged = docs[0]
-          seen = {f["url"] for f in merged.get("files", [])}
-          for extra in docs[1:]:
-              for fi in extra.get("files", []):
-                  if fi["url"] not in seen:
-                      merged.setdefault("files", []).append(fi)
-                      seen.add(fi["url"])
-          with open("artifacts/latest-mac.yml", "w") as fh:
-              yaml.safe_dump(merged, fh, default_flow_style=False, sort_keys=False)
-          print("Merged latest-mac.yml advertises:")
-          for fi in merged.get("files", []):
-              print("  -", fi["url"])
-          PY
-
       - name: List downloaded artifacts
         run: |
           echo "Downloaded artifacts:"
           ls -lR ./artifacts
 
-      # Make the update manifests authoritative. electron-updater downloads the
+      # Make the update manifest authoritative. electron-updater downloads the
       # installer, hashes it, and aborts with a checksum error if it disagrees
-      # with latest*.yml. We've seen the published mac .zips drift from the hash
-      # electron-builder recorded (a constant byte offset applied after hashing),
-      # which breaks Mac auto-update outright. Rather than trust whatever hashes
-      # the build wrote, recompute every sha512/size/blockMapSize here from the
-      # exact bytes we're about to publish — so the manifest can never disagree
-      # with the binaries, on any platform.
-      - name: Rewrite latest*.yml checksums from published files
+      # with latest.yml. Rather than trust whatever hash the build wrote,
+      # recompute sha512/size/blockMapSize here from the exact bytes we're
+      # about to publish — so the manifest can never disagree with the binary.
+      - name: Rewrite latest.yml checksums from published files
         run: |
           set -euo pipefail
-          # Drop the runner's flaky pre-installed Microsoft apt repos (see the
-          # Linux build step) so `apt-get update` can't fail with exit code 100.
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
-                     /etc/apt/sources.list.d/azure-cli.list \
-                     /etc/apt/sources.list.d/azure-cli.sources
           sudo apt-get update -qq && sudo apt-get install -y -qq python3-yaml
           python3 - <<'PY'
           import os, glob, hashlib, base64, yaml
@@ -460,11 +314,6 @@ jobs:
           files: |
             artifacts/*.exe
             artifacts/*.blockmap
-            artifacts/*.AppImage
-            artifacts/*.deb
-            artifacts/*.rpm
-            artifacts/*.dmg
-            artifacts/*.zip
             artifacts/*.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
