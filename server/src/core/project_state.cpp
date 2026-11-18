@@ -3131,12 +3131,15 @@ void ProjectState::apply_cue_advance(const std::string& source_uuid,
             target = structural_next_locked(source_uuid);
         }
         // Resolve once so the head and what we're about to trigger (for
-        // also_play) always agree — play-first group redirect / empty-cue
-        // skip, same rule set_selected_item applies to every caller.
-        if (!target.empty()) target = resolve_selection_target_locked(target);
+        // also_play) always agree — play-first group redirect only; no
+        // empty-cue skip (see set_selected_item's doc comment) so Cue
+        // Advance always lands on the literal next item. Firing GO on an
+        // empty placeholder is then simply a no-op (nothing to play), which
+        // is the point — the operator moves past it manually.
+        if (!target.empty()) target = resolve_selection_target_locked(target, /*skip_empty_audio=*/false);
     }
     if (target.empty()) return;
-    set_selected_item(target);
+    set_selected_item(target, /*skip_empty_audio=*/false);
     if (also_play && target != source_uuid) {
         // Don't restart what's already on air — a deliberate manual start,
         // or a crossfade/Start Next marker that beat this to it, shouldn't

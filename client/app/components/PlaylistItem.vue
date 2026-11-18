@@ -187,6 +187,7 @@
           >skip_next</span>
         </div>
 
+        <span v-if="item.type === 'audio' && !item.mediaFileName" class="material-symbols-rounded item-no-media-icon">warning</span>
         <span v-if="item.type === 'audio'" class="item-duration">{{ durationDisplay }}</span>
         <span
           v-else-if="item.type === 'action'"
@@ -1115,6 +1116,13 @@ const findItemByIndex = (index: number[]): AudioItem | GroupItem | null => {
   color: #ff3b5c;
   flex-shrink: 0;
   cursor: help;
+  line-height: 1;
+}
+
+.item-no-media-icon {
+  font-size: 16px;
+  color: #ffc400;
+  flex-shrink: 0;
   line-height: 1;
 }
 
