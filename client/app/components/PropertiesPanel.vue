@@ -429,6 +429,7 @@ const {
   endItemBatch,
   formatItemIndex,
   parseItemIndexInput,
+  markPendingAutoProcess,
 } = useProject();
 const { t } = useLocalization();
 const { levels: outputTargetLevels } = useOutputTarget();
@@ -1156,12 +1157,44 @@ const handleRegenerateWaveform = async () => {
 
 const handleReplaceMedia = async () => {
   if (!import.meta.client || !window.electronAPI) return;
+  if (!currentProject.value || selectedItem.value?.type !== 'audio') return;
 
   const files = await window.electronAPI.selectAudioFiles();
   if (!files || files.length === 0) return;
 
-  // Implementation would replace the media file
-  console.log('Replace media with:', files[0]);
+  const item = audioItem.value;
+  const sourcePath = files[0];
+  const fileName = sourcePath.split(/[\\/]/).pop() || 'audio.mp3';
+  const destPath = `${currentProject.value.folderPath}/media/${fileName}`;
+
+  try {
+    const copyResult = await window.electronAPI.copyFile(sourcePath, destPath);
+    if (!copyResult.success) {
+      console.error('Failed to copy replacement media:', copyResult.error);
+      return;
+    }
+
+    // Same cue, same uuid — just pointing it at a new file. Clear the old
+    // waveform/duration so the UI doesn't show stale data while the new
+    // file's waveform is generated; waveform_ready (useProject.ts) fills
+    // duration/outPoint back in once it arrives, same as a fresh import.
+    item.mediaFileName = fileName;
+    item.mediaPath = `media/${fileName}`;
+    item.mediaServerPath = undefined;
+    item.waveformPath = `waveforms/${item.uuid}.json`;
+    item.waveform = undefined;
+    item.duration = 0;
+    item.outPoint = 0;
+
+    markPendingAutoProcess(item.uuid);
+    await saveProject();
+
+    _server.requestWaveformGeneration(destPath, item.uuid, true).catch((e: Error) => {
+      console.warn(`[waveform] generation failed for ${item.displayName}:`, e);
+    });
+  } catch (e) {
+    console.error('Error replacing media:', e);
+  }
 };
 
 const copyToClipboard = async (text: string) => {
