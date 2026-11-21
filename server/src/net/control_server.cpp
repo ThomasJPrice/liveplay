@@ -16,6 +16,7 @@
 #endif
 
 #include "liveplay/net/control_server.hpp"
+#include "liveplay/net/mobile_remote_html.hpp"
 #include "liveplay/logger.hpp"
 #include "liveplay/meta/metadata.hpp"
 #include "liveplay/meta/waveform.hpp"
@@ -808,6 +809,15 @@ static AuthGuard::Access access_for(std::string_view path) {
     // cannot refuse an upgrade (see the AuthGuard comment). Listed here so the
     // exemption is a stated decision rather than a gap someone finds later.
     if (path == "/ws")              return AuthGuard::Access::Public;
+
+    // The mobile remote (phone on the venue LAN, no way to hold a login
+    // session) and its own dedicated /api/remote/* wrappers — see
+    // mobile_remote_html.hpp and the routes right after /api/health.
+    // Deliberately Public rather than requiring a token: a stated, scoped
+    // trade (read the show + fire a cue; nothing else) rather than a gap.
+    // Revisit if/when the remote grows real auth.
+    if (path == "/remote")                       return AuthGuard::Access::Public;
+    if (path.rfind("/api/remote/", 0) == 0)      return AuthGuard::Access::Public;
 
     // The Server tier.
     if (path.rfind("/api/outputs", 0) == 0) return AuthGuard::Access::Admin;
@@ -2105,6 +2115,86 @@ void ControlServer::install_routes() {
         ([] {
             try { return json_ok(json({{"ok", true}, {"name", "liveplay-server"}})); }
             catch (...) { return json_err(500, "internal error"); }
+        });
+
+    // ---- Mobile remote ----
+    // A tiny phone-friendly remote (cue list + PREV/GO/NEXT, a cart-slot hot
+    // button grid) served directly from the server binary — see
+    // mobile_remote_html.hpp for why this is a single embedded HTML string
+    // rather than a static-file route. No auth, same posture as the rest of
+    // this REST API (Companion already relies on it being open on the LAN).
+    CROW_ROUTE(app, "/remote").methods(crow::HTTPMethod::Get)
+        ([] {
+            crow::response r{200, std::string{liveplay::net::kMobileRemoteHtml}};
+            r.add_header("Content-Type", "text/html; charset=utf-8");
+            r.add_header("Access-Control-Allow-Origin", g_cors_allow_origin);
+            return r;
+        });
+
+    // ---- Mobile remote: its own Public-tier API ----------------------------
+    // The page above runs from a phone with no way to hold a login session, so
+    // it gets its own /api/remote/* routes (see access_for()) rather than
+    // reaching the existing /api/project/*, /api/selection, /api/transport/*
+    // ones directly — those keep whatever Access tier they already have for
+    // every other caller (Companion, the desktop client). Each wrapper below
+    // calls the exact same ProjectState method its /api/... counterpart does;
+    // deliberately scoped to read-the-show-and-fire-a-cue, nothing more.
+    CROW_ROUTE(app, "/api/remote/header").methods(crow::HTTPMethod::Get)
+        ([this] { return json_ok(state_.header_document()); });
+
+    CROW_ROUTE(app, "/api/remote/items").methods(crow::HTTPMethod::Get)
+        ([this](const crow::request& req) {
+            std::size_t offset = 0, limit = 1000;
+            if (const char* p = req.url_params.get("offset")) {
+                try { offset = static_cast<std::size_t>(std::max(0, std::stoi(p))); }
+                catch (...) {}
+            }
+            if (const char* p = req.url_params.get("limit")) {
+                try { limit = static_cast<std::size_t>(std::clamp(std::stoi(p), 1, 5000)); }
+                catch (...) {}
+            }
+            return json_ok(state_.items_page(offset, limit));
+        });
+
+    CROW_ROUTE(app, "/api/remote/summary").methods(crow::HTTPMethod::Get)
+        ([this] { return json_ok(state_.state_summary()); });
+
+    // Body: { "itemUuid": "..." } to select, or { "delta": -1 | 1 } to step —
+    // same contract as POST /api/selection.
+    CROW_ROUTE(app, "/api/remote/select").methods(crow::HTTPMethod::Post)
+        ([this](const crow::request& req) {
+            try {
+                auto j = json::parse(req.body.empty() ? std::string{"{}"} : req.body);
+                std::string uuid;
+                if (j.contains("delta") && j["delta"].is_number_integer()) {
+                    const int delta = j["delta"].get<int>();
+                    if (delta == 0) return json_err(400, "delta must be non-zero");
+                    uuid = state_.step_selection(delta, selection_anchors(engine_, state_));
+                    if (uuid.empty()) return json_err(404, "playlist is empty");
+                } else if (j.contains("itemUuid") && j["itemUuid"].is_string()) {
+                    uuid = j["itemUuid"].get<std::string>();
+                    state_.set_selected_item(uuid, /*skip_empty_audio=*/false);
+                } else {
+                    return json_err(400, "expected \"itemUuid\" or \"delta\"");
+                }
+                return json_ok(json({{"ok", true}, {"itemUuid", uuid}}));
+            } catch (const std::exception& e) { return json_err(400, e.what()); }
+        });
+
+    CROW_ROUTE(app, "/api/remote/go").methods(crow::HTTPMethod::Post, crow::HTTPMethod::Get)
+        ([this] {
+            const std::string uuid = state_.go();
+            if (uuid.empty()) return json_err(404, "nothing armed or playing to GO to");
+            return json_ok(json({{"ok", true}, {"uuid", uuid}}));
+        });
+
+    CROW_ROUTE(app, "/api/remote/cart/<int>/play")
+        .methods(crow::HTTPMethod::Post, crow::HTTPMethod::Get)
+        ([this](int slot) {
+            const std::string uuid = state_.cart_slot_item_uuid(slot);
+            if (uuid.empty()) return json_err(404, "cart slot is empty");
+            if (!state_.trigger_item(uuid)) return json_err(404, "item not loaded into engine");
+            return json_ok(json({{"ok", true}, {"slot", slot}, {"uuid", uuid}}));
         });
 
     // Returns the requesting client's IP as seen by the server, plus a
