@@ -78,7 +78,7 @@ import { DEFAULT_AUDIO_ITEM, DEFAULT_GROUP_ITEM, PRESET_COLORS, transitionDefaul
 import { applyAutoProcessing, buildWaveformFromChannels, parseWaveformFileData } from '~/utils/audio';
 import { useOutputTarget } from '~/composables/useOutputTarget';
 
-const { currentProject, addItem, consumePendingAutoProcess, updateIndices, saveProject, triggerWaveformUpdate, isLoading, getAllItemsFlat, resolveProjectPath, findItemByUuid, projectEpoch } = useProject();
+const { currentProject, addItem, consumePendingAutoProcess, isPendingAutoProcess, updateIndices, saveProject, triggerWaveformUpdate, isLoading, getAllItemsFlat, resolveProjectPath, findItemByUuid, projectEpoch } = useProject();
 const { t } = useLocalization();
 const { levels: outputTargetLevels } = useOutputTarget();
 const { activeCues } = useAudioEngine();
@@ -253,6 +253,13 @@ const scanForMissingWaveforms = async () => {
       const ai = item as AudioItem;
       if (ai.waveform) continue;
       if (requestedWaveformUuids.has(ai.uuid)) continue;
+      // Someone else (a fresh import, Replace Media) already has an explicit,
+      // forced request in flight for this uuid — an unforced request from
+      // here would race it and can win by serving a STALE on-disk waveform
+      // cache (e.g. left over from this exact uuid's media before it was
+      // replaced), which would wrongly auto-process against the old file's
+      // data and then never get corrected once the real decode lands.
+      if (isPendingAutoProcess(ai.uuid)) continue;
 
       // Prefer the explicit server-absolute path written by the new import
       // flow. Fall back to project-folder + relative mediaPath for items
