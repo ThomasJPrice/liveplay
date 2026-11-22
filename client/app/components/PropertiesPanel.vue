@@ -1167,11 +1167,23 @@ const handleReplaceMedia = async () => {
   const fileName = sourcePath.split(/[\\/]/).pop() || 'audio.mp3';
   const destPath = `${currentProject.value.folderPath}/media/${fileName}`;
 
+  // Picking "the same audio" for a second cue very often means picking the
+  // file right back out of this project's own media folder — where the
+  // first cue's copy already put it — so source and destination can be the
+  // exact same file. fs.copyFileSync(a, a) throws EBUSY on Windows (can't
+  // copy a file onto itself while it's open), which silently aborted this
+  // whole function with nothing but a console.error nobody ever saw. Treat
+  // an already-in-place file as nothing to copy, not a failure.
+  const samePath = (a: string, b: string) =>
+    a.replace(/\\/g, '/').toLowerCase() === b.replace(/\\/g, '/').toLowerCase();
+
   try {
-    const copyResult = await window.electronAPI.copyFile(sourcePath, destPath);
-    if (!copyResult.success) {
-      console.error('Failed to copy replacement media:', copyResult.error);
-      return;
+    if (!samePath(sourcePath, destPath)) {
+      const copyResult = await window.electronAPI.copyFile(sourcePath, destPath);
+      if (!copyResult.success) {
+        console.error('Failed to copy replacement media:', copyResult.error);
+        return;
+      }
     }
 
     // Same cue, same uuid — just pointing it at a new file. Clear the old

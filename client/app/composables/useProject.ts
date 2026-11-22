@@ -1276,6 +1276,15 @@ export const useProject = () => {
     return true;
   };
 
+  // Non-consuming check — lets another caller that's about to request this
+  // item's waveform itself (PlaylistView's scanForMissingWaveforms) know
+  // someone else (a fresh import, Replace Media) already has an explicit,
+  // forced request in flight for it, so it should stay out of the way
+  // rather than firing its own unforced, possibly stale-cache-hitting
+  // request that would race it — see handleReplaceMedia's comment on why
+  // that race mattered.
+  const isPendingAutoProcess = (uuid: string): boolean => _autoProcessPendingUuids.has(uuid);
+
   // Remove an item
   const removeItem = (uuid: string) => {
     if (!currentProject.value) return;
@@ -1733,13 +1742,25 @@ export const useProject = () => {
                   _autoProcessPendingUuids.delete(patch.item_uuid);
                   if (!hadWaveform) {
                     const settings = (currentProject.value as any)?.settings;
+                    let autoProcessed = false;
                     if (!settings?.disableAutoVolumeAndTrim) {
                       const targetDb: number = settings?.outputTargetLevels?.autoVolumeTargetDb ?? -23;
-                      applyAutoProcessing(target as AudioItem, targetDb);
+                      autoProcessed = applyAutoProcessing(target as AudioItem, targetDb);
                     }
                     // Re-anchor the import-default start-next marker to the
                     // final (possibly auto-trimmed) out point.
                     anchorStartNextMarker(target as AudioItem);
+                    // applyAutoProcessing/anchorStartNextMarker only mutate the
+                    // reactive item — this arrives via a WS doc_patch, not a user
+                    // gesture, so there's no surrounding handleSave()/commitField()
+                    // call to push it to the server the way every other edit path
+                    // has. The manual "Auto-adjust volume" button (which uses this
+                    // same applyAutoProcessing) always saves right after — do the
+                    // same here, or the computed trim/volume never leaves this
+                    // client: the waveform redraws trimmed locally, but playback
+                    // (server-authoritative) keeps using the old in/out points
+                    // and volume until something else happens to save.
+                    if (autoProcessed) void saveProject();
                   }
                 }
                 triggerWaveformUpdate();
@@ -2125,6 +2146,7 @@ export const useProject = () => {
     addItem,
     markPendingAutoProcess,
     consumePendingAutoProcess,
+    isPendingAutoProcess,
     removeItem,
     findItemByUuid,
     findItemByIndex,

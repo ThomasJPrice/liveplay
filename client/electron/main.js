@@ -2926,6 +2926,22 @@ ipcMain.handle('copy-file', async (event, source, destination) => {
     if (!fs.existsSync(destDir)) {
       fs.mkdirSync(destDir, { recursive: true });
     }
+    // A second cue pointed at "the same audio" resolves to the same
+    // destination filename as a cue that already uses it — and if that
+    // first cue is loaded (or playing) in the server's audio engine, the
+    // engine holds the file open and Windows refuses to overwrite it
+    // (EBUSY), aborting the whole Replace Media flow. There is nothing
+    // useful to copy in that case anyway — the file already in place is,
+    // by name, the same content — so treat a same-size match at the
+    // destination as "already there" and skip the write entirely, same as
+    // picking the file back out of the project's own media folder.
+    if (fs.existsSync(destination)) {
+      try {
+        if (fs.statSync(source).size === fs.statSync(destination).size) {
+          return { success: true };
+        }
+      } catch { /* fall through to a real copy attempt */ }
+    }
     fs.copyFileSync(source, destination);
     return { success: true };
   } catch (error) {
